@@ -1,0 +1,55 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.env
+.venv/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.env.*
+.idea/
+*.pyo
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.pyre/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# ===== Rust =====
+/target/
+**/*.rs.bk
+Cargo.lock
+/.cargo/
+
+# Rust specific IDEs
+/.idea/
+*.rs.bk
+
+# ===== MySQL dumps / configs =====
+*.sql
+*.sql.gz
+*.dump
+*.mysql
+
+# ===== OS & editor specific =====
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# Logs
+*.log
+
+# Secrets & credentials (just in case)
+*.pem*

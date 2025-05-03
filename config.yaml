@@ -1,0 +1,5 @@
+database_url: "mysql://root:123456@localhost/quant_engine"
+port: 8081
+
+max_connections: 20
+min_connections: 5
