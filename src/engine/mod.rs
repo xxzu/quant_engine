@@ -4,16 +4,16 @@ pub mod state;
 
 use crate::config::sys_config::AppConfig;
 use crate::exchange::types::*;
+use crate::strategy::context::StrategyContext;
 use crate::strategy::signal::{Signal, SignalDirection};
 use crate::strategy::strategy_trait::Strategy;
-use crate::strategy::context::StrategyContext;
 use anyhow::Result;
 use rust_decimal::Decimal;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use tracing::{info, error, warn};
+use tracing::{error, info};
 
-use state::{SharedEngineState, EngineState, calc_strategy_stage};
+use state::{calc_strategy_stage, EngineState, SharedEngineState};
 
 /// 交易引擎
 pub struct TradingEngine {
@@ -41,7 +41,8 @@ impl TradingEngine {
 
     /// 启动引擎
     pub async fn start(&self) -> Result<()> {
-        self.running.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(true, std::sync::atomic::Ordering::SeqCst);
 
         let symbol = &self.config.strategy.symbol;
         let interval = &self.config.strategy.kline_interval;
@@ -51,14 +52,19 @@ impl TradingEngine {
 
         // 1. 设置杠杆和保证金模式
         self.exchange.set_leverage(symbol, leverage).await?;
-        self.exchange.set_margin_mode(symbol, MarginMode::Isolated).await?;
+        self.exchange
+            .set_margin_mode(symbol, MarginMode::Isolated)
+            .await?;
 
         // 2. 获取初始状态
         let account = self.exchange.get_account().await?;
         let positions = self.exchange.get_positions(Some(symbol)).await?;
         let contract = self.exchange.get_contract_info(symbol).await?;
 
-        info!("💰 账户余额: {}U, 可用: {}U", account.total_balance, account.available_balance);
+        info!(
+            "💰 账户余额: {}U, 可用: {}U",
+            account.total_balance, account.available_balance
+        );
 
         // 3. 初始化策略
         let ctx = StrategyContext {
@@ -116,7 +122,7 @@ impl TradingEngine {
                             let mut st = state.write().await;
                             st.last_price = kline.close;
                         }
-                        
+
                         let mut strat = strategy.lock().await;
                         match strat.on_kline(&kline).await {
                             Ok(signals) => {
@@ -174,8 +180,10 @@ impl TradingEngine {
         signal: &Signal,
         contract: &ContractInfo,
     ) -> Result<()> {
-        info!("⚡ 执行信号: {:?} {} 金额={}U",
-            signal.direction, signal.symbol, signal.amount_usdt);
+        info!(
+            "⚡ 执行信号: {:?} {} 金额={}U",
+            signal.direction, signal.symbol, signal.amount_usdt
+        );
 
         match signal.direction {
             SignalDirection::OpenLong => {
@@ -201,7 +209,10 @@ impl TradingEngine {
                     close_position: None,
                 };
                 let resp = exchange.place_order(&order_req).await?;
-                info!("✅ 开多成功: {} qty={} price={}", signal.symbol, quantity, resp.avg_price);
+                info!(
+                    "✅ 开多成功: {} qty={} price={}",
+                    signal.symbol, quantity, resp.avg_price
+                );
 
                 // 设置止损单
                 if let Some(sl_pct) = &signal.stop_loss_pct {
@@ -263,7 +274,10 @@ impl TradingEngine {
                     close_position: None,
                 };
                 let resp = exchange.place_order(&order_req).await?;
-                info!("✅ 开空成功: {} qty={} price={}", signal.symbol, quantity, resp.avg_price);
+                info!(
+                    "✅ 开空成功: {} qty={} price={}",
+                    signal.symbol, quantity, resp.avg_price
+                );
 
                 // 止损 (做空止损在上方)
                 if let Some(sl_pct) = &signal.stop_loss_pct {
@@ -273,10 +287,12 @@ impl TradingEngine {
                         symbol: signal.symbol.clone(),
                         side: OrderSide::Buy,
                         order_type: OrderType::StopMarket,
-                        quantity: None, price: None,
+                        quantity: None,
+                        price: None,
                         stop_price: Some(sl_price),
                         position_side: Some(PositionSide::Both),
-                        reduce_only: None, time_in_force: None,
+                        reduce_only: None,
+                        time_in_force: None,
                         close_position: Some(true),
                     };
                     exchange.place_order(&sl_req).await?;
@@ -291,10 +307,12 @@ impl TradingEngine {
                         symbol: signal.symbol.clone(),
                         side: OrderSide::Buy,
                         order_type: OrderType::TakeProfitMarket,
-                        quantity: None, price: None,
+                        quantity: None,
+                        price: None,
                         stop_price: Some(tp_price),
                         position_side: Some(PositionSide::Both),
-                        reduce_only: None, time_in_force: None,
+                        reduce_only: None,
+                        time_in_force: None,
                         close_position: Some(true),
                     };
                     exchange.place_order(&tp_req).await?;
@@ -312,9 +330,12 @@ impl TradingEngine {
                         symbol: signal.symbol.clone(),
                         side: OrderSide::Sell,
                         order_type: OrderType::Market,
-                        quantity: Some(p.quantity.abs()), price: None, stop_price: None,
+                        quantity: Some(p.quantity.abs()),
+                        price: None,
+                        stop_price: None,
                         position_side: Some(PositionSide::Both),
-                        reduce_only: Some(true), time_in_force: None,
+                        reduce_only: Some(true),
+                        time_in_force: None,
                         close_position: None,
                     };
                     exchange.place_order(&req).await?;
@@ -330,9 +351,12 @@ impl TradingEngine {
                         symbol: signal.symbol.clone(),
                         side: OrderSide::Buy,
                         order_type: OrderType::Market,
-                        quantity: Some(p.quantity.abs()), price: None, stop_price: None,
+                        quantity: Some(p.quantity.abs()),
+                        price: None,
+                        stop_price: None,
                         position_side: Some(PositionSide::Both),
-                        reduce_only: Some(true), time_in_force: None,
+                        reduce_only: Some(true),
+                        time_in_force: None,
                         close_position: None,
                     };
                     exchange.place_order(&req).await?;
@@ -346,7 +370,8 @@ impl TradingEngine {
 
     /// 停止引擎
     pub async fn stop(&self) -> Result<()> {
-        self.running.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         self.strategy.lock().await.on_stop().await?;
         info!("⏹️ 交易引擎已停止");
         Ok(())

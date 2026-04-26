@@ -1,8 +1,8 @@
 //! 手动交易处理器
 
-use axum::{Json, Extension};
 use crate::engine::state::{SharedEngineState, TrackedOrder};
 use crate::exchange::types::*;
+use axum::{Extension, Json};
 use rust_decimal::Decimal;
 use std::sync::Arc;
 
@@ -10,14 +10,14 @@ use std::sync::Arc;
 #[derive(Debug, serde::Deserialize)]
 pub struct ManualOrderRequest {
     pub symbol: String,
-    pub side: String,       // "buy" or "sell"
-    pub direction: String,  // "open_long", "open_short", "close_long", "close_short"
+    pub side: String,      // "buy" or "sell"
+    pub direction: String, // "open_long", "open_short", "close_long", "close_short"
     pub amount_usdt: f64,
     pub leverage: u32,
     pub price: Option<f64>,
     pub stop_loss_pct: Option<f64>,
     pub take_profit_pct: Option<f64>,
-    pub strategy_id: Option<String>,  // 所属策略ID，留空表示手动交易
+    pub strategy_id: Option<String>, // 所属策略ID，留空表示手动交易
 }
 
 /// 关闭指定订单请求
@@ -34,7 +34,12 @@ pub async fn place_manual_order(
 ) -> Json<serde_json::Value> {
     tracing::info!(
         "📝 手动下单请求: {} {} {} 金额={}U 杠杆={}x 价格={:?}",
-        req.symbol, req.direction, req.side, req.amount_usdt, req.leverage, req.price
+        req.symbol,
+        req.direction,
+        req.side,
+        req.amount_usdt,
+        req.leverage,
+        req.price
     );
 
     let (is_running, available_balance) = {
@@ -51,8 +56,11 @@ pub async fn place_manual_order(
 
     // 平仓操作不需要检查余额
     let is_close = req.direction == "close_long" || req.direction == "close_short";
-    
-    let amount = Decimal::from_f64_retain(req.amount_usdt).unwrap_or(Decimal::ZERO);
+
+    let mut amount = Decimal::from_f64_retain(req.amount_usdt).unwrap_or(Decimal::ZERO);
+    let mut stop_loss_pct = req.stop_loss_pct;
+    let mut take_profit_pct = req.take_profit_pct;
+    let mut leverage = req.leverage;
     if !is_close {
         if amount > available_balance {
             return Json(serde_json::json!({
@@ -73,8 +81,38 @@ pub async fn place_manual_order(
             let st = state.read().await;
             if let Some(strategy) = st.strategies.iter().find(|s| &s.id == sid) {
                 if !strategy.active {
-                    return Json(serde_json::json!({ "success": false, "error": "该策略未启用" }));
+                    return Json(
+                        serde_json::json!({ "success": false, "error": "该策略未启用，请先到策略管理中分配资金并开启" }),
+                    );
                 }
+
+                if sid == "manual_discipline" {
+                    let total_funds = strategy.allocated_funds + strategy.total_pnl;
+                    let avail = strategy.available_funds();
+
+                    let max_amount = if total_funds >= Decimal::from(200) {
+                        std::cmp::max(
+                            Decimal::from(20),
+                            total_funds * Decimal::from_f64_retain(0.1).unwrap_or(Decimal::ZERO),
+                        )
+                    } else if total_funds >= Decimal::from(80) {
+                        Decimal::from(10)
+                    } else {
+                        avail * Decimal::from_f64_retain(0.5).unwrap_or(Decimal::ZERO)
+                    };
+
+                    if amount > max_amount {
+                        return Json(
+                            serde_json::json!({ "success": false, "error": format!("纪律限制: 当前阶段单笔最大开仓金额为 {}U", max_amount.round_dp(2)) }),
+                        );
+                    }
+
+                    // 强制覆盖杠杆和止损止盈
+                    leverage = 100;
+                    stop_loss_pct = Some(20.0);
+                    take_profit_pct = Some(100.0);
+                }
+
                 if amount > strategy.available_funds() {
                     return Json(serde_json::json!({
                         "success": false,
@@ -87,7 +125,7 @@ pub async fn place_manual_order(
 
     // 设置杠杆和保证金模式 (仅在开仓时设置)
     if !is_close {
-        if let Err(e) = exchange.set_leverage(&req.symbol, req.leverage).await {
+        if let Err(e) = exchange.set_leverage(&req.symbol, leverage).await {
             tracing::error!("设置杠杆失败: {}", e);
         }
     }
@@ -95,18 +133,29 @@ pub async fn place_manual_order(
     // 获取当前价格和合约精度信息
     let ticker = match exchange.get_ticker(&req.symbol).await {
         Ok(t) => t,
-        Err(e) => return Json(serde_json::json!({ "success": false, "error": format!("获取行情失败: {}", e) })),
+        Err(e) => {
+            return Json(
+                serde_json::json!({ "success": false, "error": format!("获取行情失败: {}", e) }),
+            )
+        }
     };
     let current_price = ticker.last_price;
-    let order_price = req.price.map(|p| Decimal::from_f64_retain(p).unwrap_or(current_price)).unwrap_or(current_price);
+    let order_price = req
+        .price
+        .map(|p| Decimal::from_f64_retain(p).unwrap_or(current_price))
+        .unwrap_or(current_price);
 
     let contract = match exchange.get_contract_info(&req.symbol).await {
         Ok(c) => c,
-        Err(e) => return Json(serde_json::json!({ "success": false, "error": format!("获取合约信息失败: {}", e) })),
+        Err(e) => {
+            return Json(
+                serde_json::json!({ "success": false, "error": format!("获取合约信息失败: {}", e) }),
+            )
+        }
     };
 
     // 计算数量: 金额 * 杠杆 / 价格
-    let notional = amount * Decimal::from(req.leverage);
+    let notional = amount * Decimal::from(leverage);
     let quantity = (notional / order_price).round_dp(contract.quantity_precision as u32);
 
     // Binance 默认是单向持仓模式 (One-way mode)，这种模式下 position_side 必须是 BOTH
@@ -125,10 +174,18 @@ pub async fn place_manual_order(
                 let pos = positions.iter().find(|p| !p.quantity.is_zero());
                 match pos {
                     Some(p) => p.quantity.abs(),
-                    None => return Json(serde_json::json!({ "success": false, "error": "当前没有该交易对的持仓" })),
+                    None => {
+                        return Json(
+                            serde_json::json!({ "success": false, "error": "当前没有该交易对的持仓" }),
+                        )
+                    }
                 }
             }
-            Err(e) => return Json(serde_json::json!({ "success": false, "error": format!("获取持仓失败: {}", e) })),
+            Err(e) => {
+                return Json(
+                    serde_json::json!({ "success": false, "error": format!("获取持仓失败: {}", e) }),
+                )
+            }
         }
     } else {
         quantity
@@ -137,13 +194,25 @@ pub async fn place_manual_order(
     let order_req = OrderRequest {
         symbol: req.symbol.clone(),
         side: order_side,
-        order_type: if req.price.is_some() { OrderType::Limit } else { OrderType::Market },
+        order_type: if req.price.is_some() {
+            OrderType::Limit
+        } else {
+            OrderType::Market
+        },
         quantity: Some(close_qty),
-        price: req.price.map(|p| Decimal::from_f64_retain(p).unwrap_or_default().round_dp(contract.price_precision as u32)),
+        price: req.price.map(|p| {
+            Decimal::from_f64_retain(p)
+                .unwrap_or_default()
+                .round_dp(contract.price_precision as u32)
+        }),
         stop_price: None,
         position_side: Some(PositionSide::Both),
         reduce_only: if is_close_flag { Some(true) } else { None },
-        time_in_force: if req.price.is_some() { Some("GTC".to_string()) } else { None },
+        time_in_force: if req.price.is_some() {
+            Some("GTC".to_string())
+        } else {
+            None
+        },
         close_position: None,
     };
 
@@ -153,18 +222,29 @@ pub async fn place_manual_order(
 
             // 开仓时记录到本地追踪列表
             if !is_close_flag {
-                let direction = if order_side == OrderSide::Buy { "long" } else { "short" };
-                let strategy_id = req.strategy_id.clone().unwrap_or_else(|| "manual".to_string());
+                let direction = if order_side == OrderSide::Buy {
+                    "long"
+                } else {
+                    "short"
+                };
+                let strategy_id = req
+                    .strategy_id
+                    .clone()
+                    .unwrap_or_else(|| "manual".to_string());
                 let tracked = TrackedOrder {
                     id: resp.order_id.clone(),
                     symbol: req.symbol.clone(),
                     direction: direction.to_string(),
                     quantity: close_qty,
-                    entry_price: if resp.avg_price > Decimal::ZERO { resp.avg_price } else { order_price },
-                    leverage: req.leverage,
+                    entry_price: if resp.avg_price > Decimal::ZERO {
+                        resp.avg_price
+                    } else {
+                        order_price
+                    },
+                    leverage: leverage,
                     amount_usdt: amount,
-                    stop_loss_pct: req.stop_loss_pct,
-                    take_profit_pct: req.take_profit_pct,
+                    stop_loss_pct: stop_loss_pct,
+                    take_profit_pct: take_profit_pct,
                     opened_at: std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
@@ -191,18 +271,23 @@ pub async fn place_manual_order(
 
             // 如果是开仓，设置止损止盈
             if !is_close_flag {
-                if let Some(sl_pct) = req.stop_loss_pct {
-                    let sl_pct_dec = Decimal::from_f64_retain(sl_pct).unwrap_or(Decimal::ZERO) / Decimal::from(100);
+                if let Some(sl_pct) = stop_loss_pct {
+                    let sl_pct_dec = Decimal::from_f64_retain(sl_pct).unwrap_or(Decimal::ZERO)
+                        / Decimal::from(100);
                     let sl_price = if order_side == OrderSide::Buy {
                         order_price * (Decimal::ONE - sl_pct_dec)
                     } else {
                         order_price * (Decimal::ONE + sl_pct_dec)
                     };
                     let sl_price = sl_price.round_dp(contract.price_precision as u32);
-                    
+
                     let sl_req = OrderRequest {
                         symbol: req.symbol.clone(),
-                        side: if order_side == OrderSide::Buy { OrderSide::Sell } else { OrderSide::Buy },
+                        side: if order_side == OrderSide::Buy {
+                            OrderSide::Sell
+                        } else {
+                            OrderSide::Buy
+                        },
                         order_type: OrderType::StopMarket,
                         quantity: Some(close_qty),
                         price: None,
@@ -215,18 +300,23 @@ pub async fn place_manual_order(
                     let _ = exchange.place_order(&sl_req).await;
                 }
 
-                if let Some(tp_pct) = req.take_profit_pct {
-                    let tp_pct_dec = Decimal::from_f64_retain(tp_pct).unwrap_or(Decimal::ZERO) / Decimal::from(100);
+                if let Some(tp_pct) = take_profit_pct {
+                    let tp_pct_dec = Decimal::from_f64_retain(tp_pct).unwrap_or(Decimal::ZERO)
+                        / Decimal::from(100);
                     let tp_price = if order_side == OrderSide::Buy {
                         order_price * (Decimal::ONE + tp_pct_dec)
                     } else {
                         order_price * (Decimal::ONE - tp_pct_dec)
                     };
                     let tp_price = tp_price.round_dp(contract.price_precision as u32);
-                    
+
                     let tp_req = OrderRequest {
                         symbol: req.symbol.clone(),
-                        side: if order_side == OrderSide::Buy { OrderSide::Sell } else { OrderSide::Buy },
+                        side: if order_side == OrderSide::Buy {
+                            OrderSide::Sell
+                        } else {
+                            OrderSide::Buy
+                        },
                         order_type: OrderType::TakeProfitMarket,
                         quantity: Some(close_qty),
                         price: None,
@@ -272,15 +362,24 @@ pub async fn close_tracked_order(
     // 查找这笔订单
     let tracked = {
         let st = state.read().await;
-        st.tracked_orders.iter().find(|o| o.id == req.order_id && o.status == "open").cloned()
+        st.tracked_orders
+            .iter()
+            .find(|o| o.id == req.order_id && o.status == "open")
+            .cloned()
     };
 
     let tracked = match tracked {
         Some(t) => t,
-        None => return Json(serde_json::json!({ "success": false, "error": "未找到该订单或已关闭" })),
+        None => {
+            return Json(serde_json::json!({ "success": false, "error": "未找到该订单或已关闭" }))
+        }
     };
 
-    let side = if tracked.direction == "long" { OrderSide::Sell } else { OrderSide::Buy };
+    let side = if tracked.direction == "long" {
+        OrderSide::Sell
+    } else {
+        OrderSide::Buy
+    };
 
     let order_req = OrderRequest {
         symbol: tracked.symbol.clone(),
@@ -299,7 +398,7 @@ pub async fn close_tracked_order(
         Ok(_) => {
             let mut st = state.write().await;
             let last_price = st.last_price;
-            
+
             if let Some(order) = st.tracked_orders.iter_mut().find(|o| o.id == req.order_id) {
                 order.status = "closed".to_string();
                 // 计算实现盈亏
@@ -344,9 +443,7 @@ pub async fn close_all_positions(
 ) -> Json<serde_json::Value> {
     tracing::info!("📝 收到一键平仓请求");
 
-    let is_running = {
-        state.read().await.is_running
-    };
+    let is_running = { state.read().await.is_running };
 
     if !is_running {
         return Json(serde_json::json!({
@@ -358,7 +455,11 @@ pub async fn close_all_positions(
     // 获取当前所有持仓
     let positions = match exchange.get_positions(None).await {
         Ok(pos) => pos,
-        Err(e) => return Json(serde_json::json!({ "success": false, "error": format!("获取持仓失败: {}", e) })),
+        Err(e) => {
+            return Json(
+                serde_json::json!({ "success": false, "error": format!("获取持仓失败: {}", e) }),
+            )
+        }
     };
 
     let mut closed_count = 0;
@@ -372,8 +473,13 @@ pub async fn close_all_positions(
         // 取消所有挂单（止盈止损等）
         let _ = exchange.cancel_all_orders(&p.symbol).await;
 
-        let is_long = p.position_side == PositionSide::Long || (p.position_side == PositionSide::Both && p.quantity > Decimal::ZERO);
-        let side = if is_long { OrderSide::Sell } else { OrderSide::Buy };
+        let is_long = p.position_side == PositionSide::Long
+            || (p.position_side == PositionSide::Both && p.quantity > Decimal::ZERO);
+        let side = if is_long {
+            OrderSide::Sell
+        } else {
+            OrderSide::Buy
+        };
         let abs_qty = p.quantity.abs();
 
         let order_req = OrderRequest {

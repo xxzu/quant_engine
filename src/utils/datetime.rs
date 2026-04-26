@@ -12,7 +12,7 @@ pub fn is_trading_day(date: NaiveDate) -> bool {
 /// A股交易时段: 9:30-11:30, 13:00-15:00
 pub fn is_trading_hours(datetime: NaiveDateTime) -> bool {
     let time = datetime.time();
-    
+
     let morning_start = NaiveTime::from_hms_opt(9, 30, 0).unwrap();
     let morning_end = NaiveTime::from_hms_opt(11, 30, 0).unwrap();
     let afternoon_start = NaiveTime::from_hms_opt(13, 0, 0).unwrap();

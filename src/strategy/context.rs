@@ -30,11 +30,15 @@ impl Default for StrategyContext {
 impl StrategyContext {
     /// 是否有持仓
     pub fn has_position(&self, symbol: &str) -> bool {
-        self.positions.iter().any(|p| p.symbol == symbol && !p.quantity.is_zero())
+        self.positions
+            .iter()
+            .any(|p| p.symbol == symbol && !p.quantity.is_zero())
     }
 
     /// 获取指定交易对的持仓
     pub fn get_position(&self, symbol: &str) -> Option<&FuturesPosition> {
-        self.positions.iter().find(|p| p.symbol == symbol && !p.quantity.is_zero())
+        self.positions
+            .iter()
+            .find(|p| p.symbol == symbol && !p.quantity.is_zero())
     }
 }

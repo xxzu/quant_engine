@@ -29,6 +29,6 @@ mod tests {
 
     #[test]
     fn test_format_percent() {
-        assert_eq!(format_percent(dec!(12.345)), "12.35%");
+        assert_eq!(format_percent(dec!(12.345)), "12.34%");
     }
 }

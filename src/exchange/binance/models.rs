@@ -23,15 +23,10 @@ pub struct SymbolInfo {
 pub enum SymbolFilter {
     #[serde(rename = "PRICE_FILTER")]
     #[serde(rename_all = "camelCase")]
-    PriceFilter {
-        tick_size: String,
-    },
+    PriceFilter { tick_size: String },
     #[serde(rename = "LOT_SIZE")]
     #[serde(rename_all = "camelCase")]
-    LotSize {
-        step_size: String,
-        min_qty: String,
-    },
+    LotSize { step_size: String, min_qty: String },
     #[serde(other)]
     Other,
 }

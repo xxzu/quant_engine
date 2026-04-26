@@ -3,25 +3,24 @@
 use crate::exchange::types::FuturesPosition;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// 本地追踪的单笔订单（币安会合并同交易对持仓，我们在本地分开记录）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackedOrder {
-    pub id: String,              // 唯一ID (币安 order_id)
+    pub id: String, // 唯一ID (币安 order_id)
     pub symbol: String,
-    pub direction: String,       // "long" or "short"
-    pub quantity: Decimal,       // 开仓数量
-    pub entry_price: Decimal,    // 开仓价格
+    pub direction: String,    // "long" or "short"
+    pub quantity: Decimal,    // 开仓数量
+    pub entry_price: Decimal, // 开仓价格
     pub leverage: u32,
-    pub amount_usdt: Decimal,    // 投入保证金 (USDT)
+    pub amount_usdt: Decimal, // 投入保证金 (USDT)
     pub stop_loss_pct: Option<f64>,
     pub take_profit_pct: Option<f64>,
-    pub opened_at: i64,          // 开仓时间戳 (ms)
-    pub status: String,          // "open", "closed"
-    pub strategy_id: String,     // 所属策略ID
+    pub opened_at: i64,              // 开仓时间戳 (ms)
+    pub status: String,              // "open", "closed"
+    pub strategy_id: String,         // 所属策略ID
     pub closed_pnl: Option<Decimal>, // 平仓后的实际盈亏 (平仓时填入)
 }
 
@@ -32,11 +31,11 @@ pub struct StrategyConfig {
     pub name: String,
     pub description: String,
     pub active: bool,
-    pub allocated_funds: Decimal,    // 分配的资金 (USDT)
-    pub used_funds: Decimal,         // 当前使用中的资金
-    pub total_pnl: Decimal,          // 累计盈亏
-    pub win_count: u32,              // 盈利次数
-    pub loss_count: u32,             // 亏损次数
+    pub allocated_funds: Decimal, // 分配的资金 (USDT)
+    pub used_funds: Decimal,      // 当前使用中的资金
+    pub total_pnl: Decimal,       // 累计盈亏
+    pub win_count: u32,           // 盈利次数
+    pub loss_count: u32,          // 亏损次数
 }
 
 impl StrategyConfig {
@@ -67,6 +66,28 @@ pub struct EngineState {
 impl Default for EngineState {
     fn default() -> Self {
         let strategies = vec![
+            StrategyConfig {
+                id: "discipline".to_string(),
+                name: "🎯 逐仓纪律策略 (10U起步)".to_string(),
+                description: "10U起步，逐仓模式，100x杠杆。止损20%/止盈100%。<80U用余额50%开仓，80-200U固定10U/单(留8次试错)，200U+可加大至20U或余额10%。EMA金叉死叉+RSI过滤入场。连亏3次冷却30分钟。".to_string(),
+                active: false,
+                allocated_funds: Decimal::ZERO,
+                used_funds: Decimal::ZERO,
+                total_pnl: Decimal::ZERO,
+                win_count: 0,
+                loss_count: 0,
+            },
+            StrategyConfig {
+                id: "manual_discipline".to_string(),
+                name: "🕹️ 主观纪律训练 (10U起步)".to_string(),
+                description: "专门用于手动交易的纪律训练账户。开单时自动检查阶段限制，必须遵守20%止损100%止盈。与全自动策略资金完全隔离。".to_string(),
+                active: false,
+                allocated_funds: Decimal::ZERO,
+                used_funds: Decimal::ZERO,
+                total_pnl: Decimal::ZERO,
+                win_count: 0,
+                loss_count: 0,
+            },
             StrategyConfig {
                 id: "ema_cross".to_string(),
                 name: "EMA 金叉死叉".to_string(),

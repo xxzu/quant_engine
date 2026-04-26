@@ -1,5 +1,5 @@
-use sqlx::{MySqlPool, mysql::MySqlPoolOptions};
 use once_cell::sync::OnceCell;
+use sqlx::{mysql::MySqlPoolOptions, MySqlPool};
 use tokio::sync::Mutex;
 
 static POOL: OnceCell<MySqlPool> = OnceCell::new();

@@ -11,7 +11,10 @@ use tracing::warn;
 #[derive(Debug, Error)]
 pub enum RiskError {
     #[error("余额不足: 需要 {required}U, 可用 {available}U")]
-    InsufficientBalance { required: Decimal, available: Decimal },
+    InsufficientBalance {
+        required: Decimal,
+        available: Decimal,
+    },
 
     #[error("超过最大同时持仓数: {count} >= {limit}")]
     ExceedMaxPositions { count: u32, limit: u32 },
@@ -52,11 +55,7 @@ impl RiskManager {
     }
 
     /// 检查信号是否通过风控
-    pub fn check_signal(
-        &self,
-        signal: &Signal,
-        account: &FuturesAccount,
-    ) -> Result<(), RiskError> {
+    pub fn check_signal(&self, signal: &Signal, account: &FuturesAccount) -> Result<(), RiskError> {
         // 1. 检查余额
         if signal.amount_usdt > account.available_balance {
             return Err(RiskError::InsufficientBalance {
@@ -101,8 +100,10 @@ impl RiskManager {
     /// 记录亏损
     pub fn record_loss(&mut self, amount: Decimal) {
         self.daily_loss += amount;
-        warn!("📉 记录亏损: {}U, 当日累计: {}U / {}U",
-            amount, self.daily_loss, self.max_daily_loss);
+        warn!(
+            "📉 记录亏损: {}U, 当日累计: {}U / {}U",
+            amount, self.daily_loss, self.max_daily_loss
+        );
     }
 
     /// 重置每日统计

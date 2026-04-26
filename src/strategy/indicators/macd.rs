@@ -1,7 +1,7 @@
 //! MACD 指标
 
-use rust_decimal::Decimal;
 use super::ma::ema;
+use rust_decimal::Decimal;
 
 /// MACD 结果
 #[derive(Debug, Clone)]
@@ -15,7 +15,7 @@ pub struct MacdResult {
 }
 
 /// 计算 MACD 指标
-/// 
+///
 /// # 参数
 /// - prices: 收盘价序列
 /// - fast_period: 快线周期 (默认12)
@@ -35,7 +35,10 @@ pub fn macd(
     let mut dif_values: Vec<Decimal> = Vec::new();
 
     for i in 0..prices.len() {
-        match (fast_ema.get(i).copied().flatten(), slow_ema.get(i).copied().flatten()) {
+        match (
+            fast_ema.get(i).copied().flatten(),
+            slow_ema.get(i).copied().flatten(),
+        ) {
             (Some(fast), Some(slow)) => {
                 let diff = fast - slow;
                 dif.push(Some(diff));

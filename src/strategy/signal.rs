@@ -90,11 +90,7 @@ impl Signal {
     }
 
     /// 创建平仓信号
-    pub fn close(
-        symbol: &str,
-        direction: SignalDirection,
-        strategy_name: &str,
-    ) -> Self {
+    pub fn close(symbol: &str, direction: SignalDirection, strategy_name: &str) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             symbol: symbol.to_string(),

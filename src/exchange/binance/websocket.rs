@@ -1,14 +1,14 @@
 //! 币安 WebSocket 客户端
 
-use crate::exchange::types::*;
 use super::models::*;
+use crate::exchange::types::*;
 use anyhow::Result;
 use futures_util::StreamExt;
 use rust_decimal::Decimal;
 use std::str::FromStr;
 use tokio::sync::broadcast;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 /// 启动 K 线行情 WebSocket
 pub async fn spawn_market_ws(
@@ -108,8 +108,13 @@ pub async fn spawn_ticker_ws(
                                     let _ = tx.send(ticker);
                                 }
                             }
-                            Ok(Message::Close(_)) => { break; }
-                            Err(e) => { error!("Ticker WS error: {}", e); break; }
+                            Ok(Message::Close(_)) => {
+                                break;
+                            }
+                            Err(e) => {
+                                error!("Ticker WS error: {}", e);
+                                break;
+                            }
                             _ => {}
                         }
                     }
@@ -147,17 +152,23 @@ pub async fn spawn_user_data_ws(
                                     let event_type = raw["e"].as_str().unwrap_or("");
                                     match event_type {
                                         "ORDER_TRADE_UPDATE" => {
-                                            if let Ok(update) = serde_json::from_str::<WsOrderUpdate>(&text) {
+                                            if let Ok(update) =
+                                                serde_json::from_str::<WsOrderUpdate>(&text)
+                                            {
                                                 let order = OrderResponse {
                                                     order_id: update.order.order_id.to_string(),
                                                     client_order_id: String::new(),
                                                     symbol: update.order.symbol,
                                                     side: parse_side(&update.order.side),
-                                                    order_type: parse_type(&update.order.order_type),
+                                                    order_type: parse_type(
+                                                        &update.order.order_type,
+                                                    ),
                                                     status: parse_status(&update.order.status),
                                                     price: parse_dec(&update.order.price),
                                                     quantity: parse_dec(&update.order.orig_qty),
-                                                    executed_qty: parse_dec(&update.order.executed_qty),
+                                                    executed_qty: parse_dec(
+                                                        &update.order.executed_qty,
+                                                    ),
                                                     avg_price: parse_dec(&update.order.avg_price),
                                                     timestamp: 0,
                                                 };
@@ -171,8 +182,13 @@ pub async fn spawn_user_data_ws(
                                     }
                                 }
                             }
-                            Ok(Message::Close(_)) => { break; }
-                            Err(e) => { error!("User data WS error: {}", e); break; }
+                            Ok(Message::Close(_)) => {
+                                break;
+                            }
+                            Err(e) => {
+                                error!("User data WS error: {}", e);
+                                break;
+                            }
                             _ => {}
                         }
                     }
@@ -193,7 +209,11 @@ fn parse_dec(s: &str) -> Decimal {
 }
 
 fn parse_side(s: &str) -> OrderSide {
-    if s == "BUY" { OrderSide::Buy } else { OrderSide::Sell }
+    if s == "BUY" {
+        OrderSide::Buy
+    } else {
+        OrderSide::Sell
+    }
 }
 
 fn parse_type(s: &str) -> OrderType {

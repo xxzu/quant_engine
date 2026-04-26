@@ -53,8 +53,8 @@ impl BinanceClient {
 
     /// HMAC-SHA256 签名
     fn sign(&self, query_string: &str) -> String {
-        let mut mac = HmacSha256::new_from_slice(self.secret_key.as_bytes())
-            .expect("HMAC key error");
+        let mut mac =
+            HmacSha256::new_from_slice(self.secret_key.as_bytes()).expect("HMAC key error");
         mac.update(query_string.as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }
@@ -80,7 +80,8 @@ impl BinanceClient {
         let query = self.build_signed_query(params);
         let url = format!("{}{}?{}", self.base_url, path, query);
 
-        let resp = self.http
+        let resp = self
+            .http
             .get(&url)
             .header("X-MBX-APIKEY", &self.api_key)
             .send()
@@ -100,7 +101,8 @@ impl BinanceClient {
         let query = self.build_signed_query(params);
         let url = format!("{}{}?{}", self.base_url, path, query);
 
-        let resp = self.http
+        let resp = self
+            .http
             .post(&url)
             .header("X-MBX-APIKEY", &self.api_key)
             .send()
@@ -120,7 +122,8 @@ impl BinanceClient {
         let query = self.build_signed_query(params);
         let url = format!("{}{}?{}", self.base_url, path, query);
 
-        let resp = self.http
+        let resp = self
+            .http
             .delete(&url)
             .header("X-MBX-APIKEY", &self.api_key)
             .send()
@@ -139,11 +142,7 @@ impl BinanceClient {
     async fn public_get(&self, path: &str, params: &[(&str, &str)]) -> Result<String> {
         let url = format!("{}{}", self.base_url, path);
 
-        let resp = self.http
-            .get(&url)
-            .query(params)
-            .send()
-            .await?;
+        let resp = self.http.get(&url).query(params).send().await?;
 
         let status = resp.status();
         let body = resp.text().await?;
@@ -214,7 +213,8 @@ impl BinanceClient {
     /// 获取 listenKey（用户数据流）
     pub async fn get_listen_key(&self) -> Result<String> {
         let url = format!("{}/fapi/v1/listenKey", self.base_url);
-        let resp = self.http
+        let resp = self
+            .http
             .post(&url)
             .header("X-MBX-APIKEY", &self.api_key)
             .send()
@@ -238,7 +238,9 @@ impl ExchangeApi for BinanceClient {
         let body = self.public_get("/fapi/v1/exchangeInfo", &[]).await?;
         let info: ExchangeInfoResponse = serde_json::from_str(&body)?;
 
-        let sym = info.symbols.iter()
+        let sym = info
+            .symbols
+            .iter()
             .find(|s| s.symbol == symbol)
             .ok_or_else(|| anyhow!("Symbol {} not found", symbol))?;
 
@@ -251,7 +253,10 @@ impl ExchangeApi for BinanceClient {
                 SymbolFilter::PriceFilter { tick_size: ts } => {
                     tick_size = Self::parse_decimal(ts);
                 }
-                SymbolFilter::LotSize { step_size: ss, min_qty: mq } => {
+                SymbolFilter::LotSize {
+                    step_size: ss,
+                    min_qty: mq,
+                } => {
                     step_size = Self::parse_decimal(ss);
                     min_qty = Self::parse_decimal(mq);
                 }
@@ -274,17 +279,24 @@ impl ExchangeApi for BinanceClient {
     /// 获取 K线数据
     async fn get_klines(&self, symbol: &str, interval: &str, limit: u32) -> Result<Vec<Kline>> {
         let limit_str = limit.to_string();
-        let body = self.public_get("/fapi/v1/klines", &[
-            ("symbol", symbol),
-            ("interval", interval),
-            ("limit", &limit_str),
-        ]).await?;
+        let body = self
+            .public_get(
+                "/fapi/v1/klines",
+                &[
+                    ("symbol", symbol),
+                    ("interval", interval),
+                    ("limit", &limit_str),
+                ],
+            )
+            .await?;
 
         let raw: Vec<KlineRaw> = serde_json::from_str(&body)?;
         let mut klines = Vec::with_capacity(raw.len());
 
         for item in &raw {
-            if item.len() < 7 { continue; }
+            if item.len() < 7 {
+                continue;
+            }
             klines.push(Kline {
                 symbol: symbol.to_string(),
                 interval: interval.to_string(),
@@ -304,9 +316,9 @@ impl ExchangeApi for BinanceClient {
 
     /// 获取当前价格
     async fn get_ticker(&self, symbol: &str) -> Result<TickerData> {
-        let body = self.public_get("/fapi/v1/ticker/24hr", &[
-            ("symbol", symbol),
-        ]).await?;
+        let body = self
+            .public_get("/fapi/v1/ticker/24hr", &[("symbol", symbol)])
+            .await?;
 
         let raw: serde_json::Value = serde_json::from_str(&body)?;
         Ok(TickerData {
@@ -344,23 +356,42 @@ impl ExchangeApi for BinanceClient {
         let body = self.signed_get("/fapi/v2/positionRisk", &params).await?;
         let raw: Vec<PositionResponse> = serde_json::from_str(&body)?;
 
-        let positions: Vec<FuturesPosition> = raw.iter()
+        let positions: Vec<FuturesPosition> = raw
+            .iter()
             .filter(|p| {
                 let amt = Self::parse_decimal(&p.position_amt);
-                if amt.is_zero() { return false; }
-                if let Some(s) = symbol { p.symbol == s } else { true }
+                if amt.is_zero() {
+                    return false;
+                }
+                if let Some(s) = symbol {
+                    p.symbol == s
+                } else {
+                    true
+                }
             })
             .map(|p| FuturesPosition {
                 symbol: p.symbol.clone(),
                 position_side: Self::parse_position_side(&p.position_side),
                 quantity: Self::parse_decimal(&p.position_amt),
                 entry_price: Self::parse_decimal(&p.entry_price),
-                mark_price: p.mark_price.as_ref().map(|s| Self::parse_decimal(s)).unwrap_or(Decimal::ZERO),
+                mark_price: p
+                    .mark_price
+                    .as_ref()
+                    .map(|s| Self::parse_decimal(s))
+                    .unwrap_or(Decimal::ZERO),
                 unrealized_pnl: Self::parse_decimal(&p.un_realized_profit),
                 leverage: p.leverage.parse().unwrap_or(1),
                 margin_mode: Self::parse_margin_mode(p.margin_type.as_deref().unwrap_or("cross")),
-                liquidation_price: p.liquidation_price.as_ref().map(|s| Self::parse_decimal(s)).unwrap_or(Decimal::ZERO),
-                margin: p.isolated_margin.as_ref().map(|s| Self::parse_decimal(s)).unwrap_or(Decimal::ZERO),
+                liquidation_price: p
+                    .liquidation_price
+                    .as_ref()
+                    .map(|s| Self::parse_decimal(s))
+                    .unwrap_or(Decimal::ZERO),
+                margin: p
+                    .isolated_margin
+                    .as_ref()
+                    .map(|s| Self::parse_decimal(s))
+                    .unwrap_or(Decimal::ZERO),
             })
             .collect();
 
@@ -449,8 +480,10 @@ impl ExchangeApi for BinanceClient {
             timestamp: raw.update_time,
         };
 
-        info!("📝 订单已提交: {} {} {} {} @ {:?}",
-            resp.symbol, resp.side, resp.order_type, resp.quantity, resp.price);
+        info!(
+            "📝 订单已提交: {} {} {} {} @ {:?}",
+            resp.symbol, resp.side, resp.order_type, resp.quantity, resp.price
+        );
 
         Ok(resp)
     }
@@ -473,7 +506,8 @@ impl ExchangeApi for BinanceClient {
         params.insert("symbol", symbol.to_string());
         params.insert("timestamp", Self::timestamp());
 
-        self.signed_delete("/fapi/v1/allOpenOrders", &params).await?;
+        self.signed_delete("/fapi/v1/allOpenOrders", &params)
+            .await?;
         info!("❌ 已撤销 {} 全部挂单", symbol);
         Ok(())
     }
@@ -504,13 +538,15 @@ impl ExchangeApi for BinanceClient {
     }
 
     /// 订阅 K线 (WebSocket)
-    async fn subscribe_kline(&self, symbol: &str, interval: &str) -> Result<broadcast::Receiver<Kline>> {
+    async fn subscribe_kline(
+        &self,
+        symbol: &str,
+        interval: &str,
+    ) -> Result<broadcast::Receiver<Kline>> {
         let stream = format!("{}@kline_{}", symbol.to_lowercase(), interval);
         let (tx, rx) = broadcast::channel(256);
 
-        super::websocket::spawn_market_ws(
-            &self.ws_url, &stream, tx, symbol, interval,
-        ).await?;
+        super::websocket::spawn_market_ws(&self.ws_url, &stream, tx, symbol, interval).await?;
 
         Ok(rx)
     }
@@ -520,9 +556,7 @@ impl ExchangeApi for BinanceClient {
         let stream = format!("{}@bookTicker", symbol.to_lowercase());
         let (tx, rx) = broadcast::channel(256);
 
-        super::websocket::spawn_ticker_ws(
-            &self.ws_url, &stream, tx, symbol,
-        ).await?;
+        super::websocket::spawn_ticker_ws(&self.ws_url, &stream, tx, symbol).await?;
 
         Ok(rx)
     }
@@ -532,9 +566,7 @@ impl ExchangeApi for BinanceClient {
         let listen_key = self.get_listen_key().await?;
         let (tx, rx) = broadcast::channel(64);
 
-        super::websocket::spawn_user_data_ws(
-            &self.ws_url, &listen_key, tx,
-        ).await?;
+        super::websocket::spawn_user_data_ws(&self.ws_url, &listen_key, tx).await?;
 
         Ok(rx)
     }

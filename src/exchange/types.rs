@@ -1,7 +1,7 @@
 //! 交易所公共类型定义
 
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -251,7 +251,11 @@ pub trait ExchangeApi: Send + Sync {
     async fn get_order(&self, symbol: &str, order_id: &str) -> Result<OrderResponse>;
 
     /// 订阅 K线 WebSocket
-    async fn subscribe_kline(&self, symbol: &str, interval: &str) -> Result<broadcast::Receiver<Kline>>;
+    async fn subscribe_kline(
+        &self,
+        symbol: &str,
+        interval: &str,
+    ) -> Result<broadcast::Receiver<Kline>>;
 
     /// 订阅行情 WebSocket
     async fn subscribe_ticker(&self, symbol: &str) -> Result<broadcast::Receiver<TickerData>>;

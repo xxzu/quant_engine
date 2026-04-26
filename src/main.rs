@@ -26,7 +26,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = GLOBAL_CONFIG.lock().unwrap().clone();
     let port = config.server.port;
 
-    tracing::info!("📋 交易对: {} | 杠杆: {}x | 模式: {} | 止损: {}% | 止盈: {}%",
+    tracing::info!(
+        "📋 交易对: {} | 杠杆: {}x | 模式: {} | 止损: {}% | 止盈: {}%",
         config.strategy.symbol,
         config.strategy.leverage,
         config.strategy.margin_mode,
@@ -38,9 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let exchange = Arc::new(BinanceClient::from_config(&config.binance));
 
     // 创建策略
-    let strategy = Arc::new(Mutex::new(
-        DisciplineStrategy::from_app_config(&config.strategy)
-    ));
+    let strategy = Arc::new(Mutex::new(DisciplineStrategy::from_app_config(
+        &config.strategy,
+    )));
 
     // 创建交易引擎
     let engine = Arc::new(TradingEngine::new(

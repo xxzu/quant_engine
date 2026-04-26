@@ -19,8 +19,6 @@ use rust_decimal::Decimal;
 use std::collections::VecDeque;
 use tracing::{info, warn};
 
-
-
 /// 纪律策略配置
 #[derive(Debug, Clone)]
 pub struct DisciplineConfig {
@@ -95,8 +93,7 @@ impl DisciplineStrategy {
             } else {
                 MarginMode::Cross
             },
-            stop_loss_pct: Decimal::from_f64_retain(cfg.stop_loss_pct)
-                .unwrap_or(Decimal::from(20)),
+            stop_loss_pct: Decimal::from_f64_retain(cfg.stop_loss_pct).unwrap_or(Decimal::from(20)),
             take_profit_pct: Decimal::from_f64_retain(cfg.take_profit_pct)
                 .unwrap_or(Decimal::from(100)),
             ema_short: cfg.ema_short,
@@ -104,8 +101,7 @@ impl DisciplineStrategy {
             rsi_period: cfg.rsi_period,
             rsi_overbought: Decimal::from_f64_retain(cfg.rsi_overbought)
                 .unwrap_or(Decimal::from(70)),
-            rsi_oversold: Decimal::from_f64_retain(cfg.rsi_oversold)
-                .unwrap_or(Decimal::from(30)),
+            rsi_oversold: Decimal::from_f64_retain(cfg.rsi_oversold).unwrap_or(Decimal::from(30)),
             position_ratio: Decimal::from_f64_retain(cfg.position_ratio)
                 .unwrap_or(Decimal::new(5, 1)),
         })
@@ -152,35 +148,44 @@ impl DisciplineStrategy {
             (Some(Some(c)), Some(Some(p))) => (*c, *p),
             _ => return None,
         };
-        let (curr_long, prev_long) = match (ema_long_vals.get(curr_idx), ema_long_vals.get(prev_idx)) {
-            (Some(Some(c)), Some(Some(p))) => (*c, *p),
-            _ => return None,
-        };
+        let (curr_long, prev_long) =
+            match (ema_long_vals.get(curr_idx), ema_long_vals.get(prev_idx)) {
+                (Some(Some(c)), Some(Some(p))) => (*c, *p),
+                _ => return None,
+            };
         let curr_rsi = match rsi_vals.get(curr_idx) {
             Some(Some(v)) => *v,
             _ => return None,
         };
 
         // EMA 金叉 + RSI 未超买 → 开多
-        if prev_short <= prev_long && curr_short > curr_long {
-            if curr_rsi < self.config.rsi_overbought {
-                info!("📈 EMA 金叉! 短EMA({})={}, 长EMA({})={}, RSI={}",
-                    self.config.ema_short, curr_short.round_dp(2),
-                    self.config.ema_long, curr_long.round_dp(2),
-                    curr_rsi.round_dp(2));
-                return Some(SignalDirection::OpenLong);
-            }
+        if prev_short <= prev_long
+            && curr_short > curr_long
+            && curr_rsi < self.config.rsi_overbought
+        {
+            info!(
+                "📈 EMA 金叉! 短EMA({})={}, 长EMA({})={}, RSI={}",
+                self.config.ema_short,
+                curr_short.round_dp(2),
+                self.config.ema_long,
+                curr_long.round_dp(2),
+                curr_rsi.round_dp(2)
+            );
+            return Some(SignalDirection::OpenLong);
         }
 
         // EMA 死叉 + RSI 未超卖 → 开空
-        if prev_short >= prev_long && curr_short < curr_long {
-            if curr_rsi > self.config.rsi_oversold {
-                info!("📉 EMA 死叉! 短EMA({})={}, 长EMA({})={}, RSI={}",
-                    self.config.ema_short, curr_short.round_dp(2),
-                    self.config.ema_long, curr_long.round_dp(2),
-                    curr_rsi.round_dp(2));
-                return Some(SignalDirection::OpenShort);
-            }
+        if prev_short >= prev_long && curr_short < curr_long && curr_rsi > self.config.rsi_oversold
+        {
+            info!(
+                "📉 EMA 死叉! 短EMA({})={}, 长EMA({})={}, RSI={}",
+                self.config.ema_short,
+                curr_short.round_dp(2),
+                self.config.ema_long,
+                curr_long.round_dp(2),
+                curr_rsi.round_dp(2)
+            );
+            return Some(SignalDirection::OpenShort);
         }
 
         None
@@ -200,9 +205,13 @@ impl Strategy for DisciplineStrategy {
     async fn init(&mut self, ctx: &StrategyContext) -> Result<()> {
         self.current_balance = ctx.available_balance;
         self.has_position = ctx.has_position(&self.config.symbol);
-        info!("🎯 纪律策略初始化: 余额={}U, 杠杆={}x, 止损={}%, 止盈={}%",
-            self.current_balance, self.config.leverage,
-            self.config.stop_loss_pct, self.config.take_profit_pct);
+        info!(
+            "🎯 纪律策略初始化: 余额={}U, 杠杆={}x, 止损={}%, 止盈={}%",
+            self.current_balance,
+            self.config.leverage,
+            self.config.stop_loss_pct,
+            self.config.take_profit_pct
+        );
         Ok(())
     }
 
@@ -239,27 +248,27 @@ impl Strategy for DisciplineStrategy {
         // 检查入场信号
         if let Some(direction) = self.check_entry_signal() {
             let signal = match direction {
-                SignalDirection::OpenLong => {
-                    Signal::open_long(
-                        &self.config.symbol,
-                        order_amount,
-                        self.config.leverage,
-                        self.name(),
-                    ).with_sl_tp(self.config.stop_loss_pct, self.config.take_profit_pct)
-                }
-                SignalDirection::OpenShort => {
-                    Signal::open_short(
-                        &self.config.symbol,
-                        order_amount,
-                        self.config.leverage,
-                        self.name(),
-                    ).with_sl_tp(self.config.stop_loss_pct, self.config.take_profit_pct)
-                }
+                SignalDirection::OpenLong => Signal::open_long(
+                    &self.config.symbol,
+                    order_amount,
+                    self.config.leverage,
+                    self.name(),
+                )
+                .with_sl_tp(self.config.stop_loss_pct, self.config.take_profit_pct),
+                SignalDirection::OpenShort => Signal::open_short(
+                    &self.config.symbol,
+                    order_amount,
+                    self.config.leverage,
+                    self.name(),
+                )
+                .with_sl_tp(self.config.stop_loss_pct, self.config.take_profit_pct),
                 _ => return Ok(vec![]),
             };
 
-            info!("🚀 生成信号: {:?} {} 金额={}U 杠杆={}x",
-                direction, self.config.symbol, order_amount, self.config.leverage);
+            info!(
+                "🚀 生成信号: {:?} {} 金额={}U 杠杆={}x",
+                direction, self.config.symbol, order_amount, self.config.leverage
+            );
 
             return Ok(vec![signal]);
         }
@@ -295,8 +304,10 @@ impl Strategy for DisciplineStrategy {
     }
 
     async fn on_order_update(&mut self, order: &OrderResponse) -> Result<()> {
-        info!("📋 订单更新: {} {:?} {:?} qty={}",
-            order.symbol, order.side, order.status, order.executed_qty);
+        info!(
+            "📋 订单更新: {} {:?} {:?} qty={}",
+            order.symbol, order.side, order.status, order.executed_qty
+        );
         Ok(())
     }
 

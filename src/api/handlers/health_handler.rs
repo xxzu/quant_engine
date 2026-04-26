@@ -1,6 +1,6 @@
-use axum::{Json, Extension};
-use serde::Serialize;
 use crate::engine::state::SharedEngineState;
+use axum::{Extension, Json};
+use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct HealthResponse {
@@ -19,7 +19,9 @@ pub async fn health_check() -> Json<HealthResponse> {
 }
 
 /// 引擎状态
-pub async fn engine_status(Extension(state): Extension<SharedEngineState>) -> Json<serde_json::Value> {
+pub async fn engine_status(
+    Extension(state): Extension<SharedEngineState>,
+) -> Json<serde_json::Value> {
     let st = state.read().await;
     Json(serde_json::to_value(&*st).unwrap_or(serde_json::json!({})))
 }

@@ -441,6 +441,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? ((s.win_count / (s.win_count + s.loss_count)) * 100).toFixed(0) 
                 : '--';
 
+            // 逐仓纪律策略的阶段指示器
+            let phaseHtml = '';
+            if (s.id === 'discipline' && allocated > 0) {
+                const totalFunds = allocated + totalPnl; // 当前总资金 = 分配 + 累计盈亏
+                let phase, orderSize, phaseColor;
+                if (totalFunds >= 200) {
+                    phase = '🏆 稳健扩张期 (200U+)';
+                    orderSize = Math.max(20, totalFunds * 0.1).toFixed(1) + 'U/单';
+                    phaseColor = '#22c55e';
+                } else if (totalFunds >= 80) {
+                    phase = '📈 进阶成长期 (80-200U)';
+                    orderSize = '固定10U/单 (留' + Math.floor(avail / 10) + '次试错)';
+                    phaseColor = '#4f8ffc';
+                } else {
+                    phase = '🌱 新手起步期 (<80U)';
+                    orderSize = (avail * 0.5).toFixed(1) + 'U/单 (余额50%)';
+                    phaseColor = '#f59e0b';
+                }
+                phaseHtml = `
+                <div style="background:rgba(79,143,252,0.08);border:1px solid rgba(79,143,252,0.15);border-radius:8px;padding:10px;margin:8px 0;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span style="color:${phaseColor};font-weight:600;">${phase}</span>
+                        <span style="color:var(--text-muted);font-size:0.85rem;">每单: ${orderSize}</span>
+                    </div>
+                    <div style="display:flex;gap:16px;margin-top:6px;font-size:0.8rem;color:var(--text-dim);">
+                        <span>止损: 20%</span><span>止盈: 100%</span><span>杠杆: 100x</span><span>逐仓模式</span>
+                    </div>
+                </div>`;
+            }
+
             const ordersHtml = (s.open_orders && s.open_orders.length > 0) 
                 ? s.open_orders.map(o => {
                     const urPnl = parseFloat(o.unrealized_pnl) || 0;
@@ -466,6 +496,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </label>
                 </div>
                 <p class="stage-desc">${s.description}</p>
+                ${phaseHtml}
                 
                 <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin: 12px 0;">
                     <div style="text-align:center;">

@@ -3,7 +3,7 @@
 use rust_decimal::Decimal;
 
 /// 计算 RSI 指标
-/// 
+///
 /// # 参数
 /// - prices: 收盘价序列
 /// - period: 计算周期 (默认14)
@@ -67,12 +67,12 @@ fn calculate_rsi(avg_gain: Decimal, avg_loss: Decimal) -> Decimal {
 
 /// 判断是否超买 (RSI > 70)
 pub fn is_overbought(rsi_value: Option<Decimal>, threshold: Decimal) -> bool {
-    rsi_value.map_or(false, |v| v > threshold)
+    rsi_value.is_some_and(|v| v > threshold)
 }
 
 /// 判断是否超卖 (RSI < 30)
 pub fn is_oversold(rsi_value: Option<Decimal>, threshold: Decimal) -> bool {
-    rsi_value.map_or(false, |v| v < threshold)
+    rsi_value.is_some_and(|v| v < threshold)
 }
 
 #[cfg(test)]
@@ -83,14 +83,26 @@ mod tests {
     #[test]
     fn test_rsi_basic() {
         let prices = vec![
-            dec!(44), dec!(44.34), dec!(44.09), dec!(43.61), dec!(44.33),
-            dec!(44.83), dec!(45.10), dec!(45.42), dec!(45.84), dec!(46.08),
-            dec!(45.89), dec!(46.03), dec!(45.61), dec!(46.28), dec!(46.28),
+            dec!(44),
+            dec!(44.34),
+            dec!(44.09),
+            dec!(43.61),
+            dec!(44.33),
+            dec!(44.83),
+            dec!(45.10),
+            dec!(45.42),
+            dec!(45.84),
+            dec!(46.08),
+            dec!(45.89),
+            dec!(46.03),
+            dec!(45.61),
+            dec!(46.28),
+            dec!(46.28),
         ];
 
         let result = rsi(&prices, 14);
         assert_eq!(result.len(), prices.len());
-        
+
         // 前 14 个应该是 None
         for i in 0..14 {
             assert!(result[i].is_none() || i == 14);
