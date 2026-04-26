@@ -1,72 +1,150 @@
-//! 策略处理器
+//! 策略管理处理器
 
-use axum::Json;
-use chrono::NaiveDate;
+use axum::{Json, Extension};
+use crate::engine::state::SharedEngineState;
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 
-/// 策略信息
-#[derive(Debug, Serialize)]
-pub struct StrategyInfo {
-    pub name: String,
-    pub description: String,
+/// 获取所有策略的完整状态
+pub async fn get_stages(Extension(state): Extension<SharedEngineState>) -> Json<serde_json::Value> {
+    let st = state.read().await;
+    let last_price = st.last_price;
+
+    // 为每个策略收集其下的订单
+    let strategies: Vec<serde_json::Value> = st.strategies.iter().map(|s| {
+        let orders: Vec<&_> = st.tracked_orders.iter()
+            .filter(|o| o.strategy_id == s.id)
+            .collect();
+
+        let open_orders: Vec<serde_json::Value> = orders.iter()
+            .filter(|o| o.status == "open")
+            .map(|o| {
+                let qty = o.quantity;
+                let entry = o.entry_price;
+                let is_long = o.direction == "long";
+                let pnl = if is_long {
+                    (last_price - entry) * qty
+                } else {
+                    (entry - last_price) * qty
+                };
+                serde_json::json!({
+                    "id": o.id,
+                    "symbol": o.symbol,
+                    "direction": o.direction,
+                    "quantity": o.quantity,
+                    "entry_price": o.entry_price,
+                    "leverage": o.leverage,
+                    "amount_usdt": o.amount_usdt,
+                    "opened_at": o.opened_at,
+                    "status": o.status,
+                    "unrealized_pnl": pnl,
+                })
+            })
+            .collect();
+
+        // 计算当前策略下所有 open 订单的未实现盈亏
+        let unrealized_pnl: Decimal = orders.iter()
+            .filter(|o| o.status == "open")
+            .map(|o| {
+                let is_long = o.direction == "long";
+                if is_long {
+                    (last_price - o.entry_price) * o.quantity
+                } else {
+                    (o.entry_price - last_price) * o.quantity
+                }
+            })
+            .sum();
+
+        serde_json::json!({
+            "id": s.id,
+            "name": s.name,
+            "description": s.description,
+            "active": s.active,
+            "allocated_funds": s.allocated_funds,
+            "used_funds": s.used_funds,
+            "available_funds": s.available_funds(),
+            "total_pnl": s.total_pnl,
+            "unrealized_pnl": unrealized_pnl,
+            "win_count": s.win_count,
+            "loss_count": s.loss_count,
+            "open_orders": open_orders,
+        })
+    }).collect();
+
+    Json(serde_json::json!({
+        "current_stage": st.strategy_stage,
+        "balance": st.total_balance,
+        "last_price": st.last_price,
+        "strategies": strategies,
+    }))
 }
 
-/// 回测请求
-#[derive(Debug, Deserialize)]
-pub struct BacktestRequest {
-    pub strategy_name: String,
-    pub codes: Vec<String>,
-    pub start_date: String,
-    pub end_date: String,
-    pub initial_capital: Option<f64>,
+/// 更新策略启用状态
+pub async fn update_stages(
+    Extension(state): Extension<SharedEngineState>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let stage_id = body["stage_id"].as_str().unwrap_or("").to_string();
+    let active = body["active"].as_bool().unwrap_or(true);
+
+    {
+        let mut st = state.write().await;
+        if let Some(s) = st.strategies.iter_mut().find(|s| s.id == stage_id) {
+            s.active = active;
+        }
+    }
+
+    tracing::info!("🔄 策略更新: {} -> {}", stage_id, if active { "启用" } else { "禁用" });
+
+    Json(serde_json::json!({
+        "success": true,
+        "stage_id": stage_id,
+        "active": active,
+    }))
 }
 
-/// 回测响应
-#[derive(Debug, Serialize)]
-pub struct BacktestResponse {
-    pub strategy_name: String,
-    pub initial_capital: f64,
-    pub final_capital: f64,
-    pub total_return: f64,
-    pub annual_return: f64,
-    pub sharpe_ratio: f64,
-    pub max_drawdown: f64,
-    pub trade_count: u32,
-    pub win_rate: f64,
-}
+/// 给策略分配资金
+pub async fn allocate_funds(
+    Extension(state): Extension<SharedEngineState>,
+    Json(body): Json<serde_json::Value>,
+) -> Json<serde_json::Value> {
+    let strategy_id = body["strategy_id"].as_str().unwrap_or("").to_string();
+    let amount = body["amount"].as_f64().unwrap_or(0.0);
+    let amount_dec = Decimal::from_f64_retain(amount).unwrap_or(Decimal::ZERO);
 
-/// 获取策略列表
-pub async fn list_strategies() -> Json<Vec<StrategyInfo>> {
-    // TODO: 返回已注册的策略列表
-    Json(vec![
-        StrategyInfo {
-            name: "MA_Cross".to_string(),
-            description: "双均线交叉策略".to_string(),
-        },
-        StrategyInfo {
-            name: "MACD_Strategy".to_string(),
-            description: "MACD 金叉死叉策略".to_string(),
-        },
-    ])
-}
+    if amount_dec < Decimal::ZERO {
+        return Json(serde_json::json!({ "success": false, "error": "分配金额不能为负" }));
+    }
 
-/// 运行回测
-pub async fn run_backtest(
-    Json(request): Json<BacktestRequest>,
-) -> Json<BacktestResponse> {
-    // TODO: 实现回测逻辑
-    let initial = request.initial_capital.unwrap_or(100_000.0);
+    {
+        let mut st = state.write().await;
+        
+        // 检查总分配不超过可用余额
+        let total_allocated: Decimal = st.strategies.iter()
+            .filter(|s| s.id != strategy_id)
+            .map(|s| s.allocated_funds)
+            .sum();
+        
+        if total_allocated + amount_dec > st.available_balance + st.strategies.iter()
+            .find(|s| s.id == strategy_id)
+            .map(|s| s.allocated_funds)
+            .unwrap_or(Decimal::ZERO) 
+        {
+            return Json(serde_json::json!({ 
+                "success": false, 
+                "error": format!("资金不足: 可用余额 {}U", st.available_balance) 
+            }));
+        }
 
-    Json(BacktestResponse {
-        strategy_name: request.strategy_name,
-        initial_capital: initial,
-        final_capital: initial,
-        total_return: 0.0,
-        annual_return: 0.0,
-        sharpe_ratio: 0.0,
-        max_drawdown: 0.0,
-        trade_count: 0,
-        win_rate: 0.0,
-    })
+        if let Some(s) = st.strategies.iter_mut().find(|s| s.id == strategy_id) {
+            s.allocated_funds = amount_dec;
+            tracing::info!("💰 策略 {} 资金分配: {}U", strategy_id, amount_dec);
+        } else {
+            return Json(serde_json::json!({ "success": false, "error": "策略不存在" }));
+        }
+    }
+
+    Json(serde_json::json!({
+        "success": true,
+        "message": format!("已分配 {}U 到策略 {}", amount_dec, strategy_id),
+    }))
 }

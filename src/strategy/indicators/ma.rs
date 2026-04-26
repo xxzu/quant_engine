@@ -1,7 +1,6 @@
 //! 移动平均线指标
 
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 
 /// 简单移动平均线 (SMA)
 pub fn sma(prices: &[Decimal], period: usize) -> Vec<Option<Decimal>> {

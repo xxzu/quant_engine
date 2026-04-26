@@ -1,5 +1,69 @@
-database_url: "mysql://root:123456@localhost/quant_engine"
-port: 8081
+# QuantEngine 配置文件
 
-max_connections: 20
-min_connections: 5
+server:
+  port: 8081
+
+database:
+  url: "mysql://root:123456@localhost/quant_engine"
+  max_connections: 20
+  min_connections: 5
+
+# 币安交易所配置
+binance:
+  api_key: "TLn3ymyyWFMYmc0GOAKLRH6zKwXujkq792zXlUBip3vnP4eJQy2a5hzjhIT7V9WI"
+  secret_key: "LnTUL37TSfLckMIuI2UrzygJtekr9DmxYmHEOFuHKIljx9op282vO4KLOBVMCXXx"
+  # 使用测试网 (开发阶段必须为 true)
+  testnet: true
+  # REST API
+  base_url: "https://testnet.binancefuture.com"
+  # WebSocket
+  ws_url: "wss://fstream.binancefuture.com/ws"
+
+
+# 策略配置
+strategy:
+  name: "discipline"
+  symbol: "ETHUSDT"
+  # 杠杆倍数
+  leverage: 100
+  # 保证金模式: isolated (逐仓) / cross (全仓)
+  margin_mode: "isolated"
+  # 止损百分比
+  stop_loss_pct: 20.0
+  # 止盈百分比
+  take_profit_pct: 100.0
+  # 每次使用可用余额的比例 (0.5 = 50%)
+  position_ratio: 0.5
+  # 入场信号: EMA 短周期
+  ema_short: 7
+  # 入场信号: EMA 长周期
+  ema_long: 25
+  # RSI 周期
+  rsi_period: 14
+  # RSI 超买阈值
+  rsi_overbought: 70.0
+  # RSI 超卖阈值
+  rsi_oversold: 30.0
+  # K线周期: 1m / 5m / 15m / 1h / 4h
+  kline_interval: "15m"
+
+# 风控配置
+risk:
+  # 单日最大亏损 (USDT)
+  max_daily_loss: 50.0
+  # 最大同时持仓数
+  max_concurrent_positions: 1
+  # 亏损后冷却时间 (分钟)
+  cooldown_minutes: 30
+  # 1000U 以下强制逐仓
+  force_isolated_below: 1000.0
+
+# 通知配置
+notify:
+  # Telegram 通知 (可选)
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+
+# 日志配置
+log:
+  level: "info"

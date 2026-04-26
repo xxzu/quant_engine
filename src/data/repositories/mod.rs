@@ -1,4 +1,2 @@
-//! 数据仓库层
-
-pub mod stock_repo;
-pub mod kline_repo;
+//! 数据仓库模块
+// TODO: 实现合约交易数据持久化

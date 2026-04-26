@@ -1,4 +1,4 @@
-//! 配置模块
+//! 系统配置
 
-pub mod sys_config;
 pub mod db_config;
+pub mod sys_config;

@@ -1,153 +1,118 @@
-//! 风控系统
+//! 合约风控系统
 
-use crate::trading::order::{Order, OrderSide};
-use crate::trading::position::Account;
+use crate::exchange::types::*;
+use crate::strategy::signal::Signal;
+use anyhow::Result;
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::warn;
 
 /// 风控错误
 #[derive(Debug, Error)]
 pub enum RiskError {
-    #[error("资金不足: 需要 {required}, 可用 {available}")]
-    InsufficientFunds { required: Decimal, available: Decimal },
+    #[error("余额不足: 需要 {required}U, 可用 {available}U")]
+    InsufficientBalance { required: Decimal, available: Decimal },
 
-    #[error("持仓不足: 需要 {required}, 可用 {available}")]
-    InsufficientPosition { required: i64, available: i64 },
+    #[error("超过最大同时持仓数: {count} >= {limit}")]
+    ExceedMaxPositions { count: u32, limit: u32 },
 
-    #[error("超过单笔最大金额限制: {amount} > {limit}")]
-    ExceedMaxOrderAmount { amount: Decimal, limit: Decimal },
+    #[error("单日亏损已达上限: {loss}U >= {limit}U")]
+    ExceedDailyLoss { loss: Decimal, limit: Decimal },
 
-    #[error("超过单日交易次数限制: {count} >= {limit}")]
-    ExceedMaxDailyTrades { count: u32, limit: u32 },
+    #[error("余额低于 {threshold}U 时必须使用逐仓模式")]
+    MustUseIsolated { threshold: Decimal },
 
-    #[error("超过单只股票持仓比例: {ratio}% > {limit}%")]
-    ExceedMaxPositionRatio { ratio: Decimal, limit: Decimal },
+    #[error("止损未设置，拒绝开仓")]
+    NoStopLoss,
 
-    #[error("禁止交易该股票: {code}")]
-    StockBlacklisted { code: String },
-
-    #[error("非交易时段")]
-    NotTradingHours,
+    #[error("冷却期中，{remaining_secs}秒后可交易")]
+    InCooldown { remaining_secs: i64 },
 }
 
-/// 风控配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RiskConfig {
-    /// 单笔最大金额
-    pub max_order_amount: Decimal,
-    /// 单日最大交易次数
-    pub max_daily_trades: u32,
-    /// 单只股票最大持仓比例 (%)
-    pub max_position_ratio: Decimal,
-    /// 黑名单股票
-    pub blacklist: Vec<String>,
-    /// 是否检查交易时段
-    pub check_trading_hours: bool,
-}
-
-impl Default for RiskConfig {
-    fn default() -> Self {
-        Self {
-            max_order_amount: Decimal::from(100_000),
-            max_daily_trades: 50,
-            max_position_ratio: Decimal::from(20),
-            blacklist: Vec::new(),
-            check_trading_hours: false, // 回测时不检查
-        }
-    }
-}
-
-/// 风控管理器
+/// 合约风控管理器
 pub struct RiskManager {
-    config: RiskConfig,
-    daily_trade_count: u32,
+    pub max_daily_loss: Decimal,
+    pub max_concurrent_positions: u32,
+    pub force_isolated_below: Decimal,
+    daily_loss: Decimal,
+    current_position_count: u32,
 }
 
 impl RiskManager {
-    pub fn new(config: RiskConfig) -> Self {
+    pub fn new(config: &crate::config::sys_config::RiskConfig) -> Self {
         Self {
-            config,
-            daily_trade_count: 0,
+            max_daily_loss: Decimal::from_f64_retain(config.max_daily_loss)
+                .unwrap_or(Decimal::from(50)),
+            max_concurrent_positions: config.max_concurrent_positions,
+            force_isolated_below: Decimal::from_f64_retain(config.force_isolated_below)
+                .unwrap_or(Decimal::from(1000)),
+            daily_loss: Decimal::ZERO,
+            current_position_count: 0,
         }
     }
 
-    /// 检查订单风险
-    pub fn check_order(&self, order: &Order, account: &Account) -> Result<(), RiskError> {
-        // 检查黑名单
-        if self.config.blacklist.contains(&order.code) {
-            return Err(RiskError::StockBlacklisted {
-                code: order.code.clone(),
+    /// 检查信号是否通过风控
+    pub fn check_signal(
+        &self,
+        signal: &Signal,
+        account: &FuturesAccount,
+    ) -> Result<(), RiskError> {
+        // 1. 检查余额
+        if signal.amount_usdt > account.available_balance {
+            return Err(RiskError::InsufficientBalance {
+                required: signal.amount_usdt,
+                available: account.available_balance,
             });
         }
 
-        // 检查交易次数
-        if self.daily_trade_count >= self.config.max_daily_trades {
-            return Err(RiskError::ExceedMaxDailyTrades {
-                count: self.daily_trade_count,
-                limit: self.config.max_daily_trades,
+        // 2. 检查持仓数量
+        if self.current_position_count >= self.max_concurrent_positions {
+            return Err(RiskError::ExceedMaxPositions {
+                count: self.current_position_count,
+                limit: self.max_concurrent_positions,
             });
         }
 
-        // 检查订单金额
-        let order_amount = order.price.unwrap_or(Decimal::ZERO) * Decimal::from(order.quantity);
-        if order_amount > self.config.max_order_amount {
-            return Err(RiskError::ExceedMaxOrderAmount {
-                amount: order_amount,
-                limit: self.config.max_order_amount,
+        // 3. 检查单日亏损
+        if self.daily_loss >= self.max_daily_loss {
+            return Err(RiskError::ExceedDailyLoss {
+                loss: self.daily_loss,
+                limit: self.max_daily_loss,
             });
         }
 
-        match order.side {
-            OrderSide::Buy => {
-                // 检查资金
-                if order_amount > account.available_cash {
-                    return Err(RiskError::InsufficientFunds {
-                        required: order_amount,
-                        available: account.available_cash,
-                    });
-                }
+        // 4. 检查止损必须设置
+        if signal.stop_loss_pct.is_none() {
+            return Err(RiskError::NoStopLoss);
+        }
 
-                // 检查持仓比例
-                let new_position_value = account
-                    .get_position(&order.code)
-                    .map_or(Decimal::ZERO, |p| p.market_value)
-                    + order_amount;
-                let new_total = account.total_asset + order_amount;
-                if !new_total.is_zero() {
-                    let ratio = (new_position_value / new_total) * Decimal::from(100);
-                    if ratio > self.config.max_position_ratio {
-                        return Err(RiskError::ExceedMaxPositionRatio {
-                            ratio,
-                            limit: self.config.max_position_ratio,
-                        });
-                    }
-                }
-            }
-            OrderSide::Sell => {
-                // 检查持仓
-                let available = account
-                    .get_position(&order.code)
-                    .map_or(0, |p| p.available);
-                if order.quantity > available {
-                    return Err(RiskError::InsufficientPosition {
-                        required: order.quantity,
-                        available,
-                    });
-                }
-            }
+        // 5. 余额低于阈值必须逐仓
+        if account.total_balance < self.force_isolated_below
+            && signal.margin_mode != MarginMode::Isolated
+        {
+            return Err(RiskError::MustUseIsolated {
+                threshold: self.force_isolated_below,
+            });
         }
 
         Ok(())
     }
 
-    /// 重置每日计数
-    pub fn reset_daily(&mut self) {
-        self.daily_trade_count = 0;
+    /// 记录亏损
+    pub fn record_loss(&mut self, amount: Decimal) {
+        self.daily_loss += amount;
+        warn!("📉 记录亏损: {}U, 当日累计: {}U / {}U",
+            amount, self.daily_loss, self.max_daily_loss);
     }
 
-    /// 增加交易计数
-    pub fn increment_trade_count(&mut self) {
-        self.daily_trade_count += 1;
+    /// 重置每日统计
+    pub fn reset_daily(&mut self) {
+        self.daily_loss = Decimal::ZERO;
+        self.current_position_count = 0;
+    }
+
+    /// 更新持仓数量
+    pub fn update_position_count(&mut self, count: u32) {
+        self.current_position_count = count;
     }
 }

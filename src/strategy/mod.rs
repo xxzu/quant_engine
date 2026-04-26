@@ -2,5 +2,6 @@
 
 pub mod strategy_trait;
 pub mod signal;
-pub mod indicators;
 pub mod context;
+pub mod indicators;
+pub mod strategies;

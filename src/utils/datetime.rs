@@ -1,6 +1,6 @@
 //! 日期时间工具函数
 
-use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
+use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 
 /// 判断是否交易日 (简单判断：非周末)
 pub fn is_trading_day(date: NaiveDate) -> bool {

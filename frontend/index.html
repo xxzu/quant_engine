@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuantEngine — 加密合约交易引擎</title>
+    <meta name="description" content="QuantEngine 加密货币合约量化交易系统仪表盘">
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- TradingView Lightweight Charts -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <nav class="sidebar" id="sidebar">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </svg>
+                </div>
+                <h1>QuantEngine</h1>
+            </div>
+            <ul class="nav-links">
+                <li class="active" data-page="dashboard">
+                    <a href="#dashboard"><span class="nav-icon">📊</span> 仪表盘</a>
+                </li>
+                <li data-page="markets">
+                    <a href="#markets"><span class="nav-icon">📈</span> 行情总览</a>
+                </li>
+                <li data-page="chart">
+                    <a href="#chart"><span class="nav-icon">🕯️</span> K线图表</a>
+                </li>
+                <li data-page="strategy">
+                    <a href="#strategy"><span class="nav-icon">🧠</span> 策略管理</a>
+                </li>
+                <li data-page="positions">
+                    <a href="#positions"><span class="nav-icon">💼</span> 持仓订单</a>
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <div class="env-badge testnet">🔧 测试网模式</div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="top-header">
+                <div class="page-title">
+                    <h2 id="page-heading">仪表盘</h2>
+                    <p class="subtitle" id="page-subtitle">系统概览与实时状态</p>
+                </div>
+                <div class="header-actions">
+                    <div class="status-badge" id="engine-status">
+                        <span class="pulse-dot"></span>
+                        连接中...
+                    </div>
+                </div>
+            </header>
+
+            <div class="page-content">
+                <!-- ==================== 仪表盘 ==================== -->
+                <section id="page-dashboard" class="page active">
+                    <div class="stats-row">
+                        <div class="stat-card glass-panel gradient-blue">
+                            <div class="stat-icon">💰</div>
+                            <div class="stat-info">
+                                <div class="stat-label">总资产 (USDT)</div>
+                                <div class="stat-value" id="total-balance">--</div>
+                            </div>
+                        </div>
+                        <div class="stat-card glass-panel">
+                            <div class="stat-icon">💵</div>
+                            <div class="stat-info">
+                                <div class="stat-label">可用余额</div>
+                                <div class="stat-value" id="available-balance">--</div>
+                            </div>
+                        </div>
+                        <div class="stat-card glass-panel">
+                            <div class="stat-icon">📊</div>
+                            <div class="stat-info">
+                                <div class="stat-label">未实现盈亏</div>
+                                <div class="stat-value pnl-value" id="unrealized-pnl">--</div>
+                            </div>
+                        </div>
+                        <div class="stat-card glass-panel">
+                            <div class="stat-icon">🎯</div>
+                            <div class="stat-info">
+                                <div class="stat-label">当前阶段</div>
+                                <div class="stat-value small" id="strategy-stage">--</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 迷你图表 + 持仓 -->
+                    <div class="dashboard-two-col">
+                        <div class="glass-panel" style="flex:2">
+                            <div class="section-header">
+                                <h3>实时走势</h3>
+                                <select id="dash-chart-symbol" class="select-input">
+                                    <option value="ETHUSDT">ETH/USDT</option>
+                                    <option value="BTCUSDT">BTC/USDT</option>
+                                    <option value="SOLUSDT">SOL/USDT</option>
+                                </select>
+                            </div>
+                            <div id="dash-chart" style="height:320px;"></div>
+                        </div>
+                        <div class="glass-panel" style="flex:1">
+                            <div class="section-header"><h3>当前持仓</h3></div>
+                            <div id="dash-positions" class="positions-mini">
+                                <div class="empty-state">暂无持仓</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================== 行情总览 ==================== -->
+                <section id="page-markets" class="page">
+                    <div class="markets-tabs">
+                        <button class="tab-btn active" data-tab="futures">🔥 合约行情</button>
+                        <button class="tab-btn" data-tab="spot">💎 现货行情</button>
+                    </div>
+                    <div class="markets-grid" id="markets-grid">
+                        <div class="empty-state">正在加载行情...</div>
+                    </div>
+                </section>
+
+                <!-- ==================== K线图表 ==================== -->
+                <section id="page-chart" class="page">
+                    <div class="chart-toolbar">
+                        <select id="chart-symbol" class="select-input">
+                            <option value="BTCUSDT">BTC/USDT</option>
+                            <option value="ETHUSDT" selected>ETH/USDT</option>
+                            <option value="BNBUSDT">BNB/USDT</option>
+                            <option value="SOLUSDT">SOL/USDT</option>
+                            <option value="XRPUSDT">XRP/USDT</option>
+                            <option value="DOGEUSDT">DOGE/USDT</option>
+                            <option value="ADAUSDT">ADA/USDT</option>
+                            <option value="AVAXUSDT">AVAX/USDT</option>
+                            <option value="DOTUSDT">DOT/USDT</option>
+                            <option value="LINKUSDT">LINK/USDT</option>
+                            <option value="MATICUSDT">MATIC/USDT</option>
+                            <option value="LTCUSDT">LTC/USDT</option>
+                        </select>
+                        <div class="interval-btns">
+                            <button class="interval-btn" data-interval="1m">1分</button>
+                            <button class="interval-btn" data-interval="5m">5分</button>
+                            <button class="interval-btn active" data-interval="15m">15分</button>
+                            <button class="interval-btn" data-interval="1h">1时</button>
+                            <button class="interval-btn" data-interval="4h">4时</button>
+                            <button class="interval-btn" data-interval="1d">1日</button>
+                        </div>
+                        <div class="chart-price-info">
+                            <span class="chart-live-price" id="chart-live-price">--</span>
+                            <span class="chart-change" id="chart-change">--%</span>
+                        </div>
+                    </div>
+                    <div id="main-chart" style="height: calc(100vh - 220px);"></div>
+                </section>
+
+                <!-- ==================== 策略管理 ==================== -->
+                <section id="page-strategy" class="page">
+                    <div class="strategy-overview glass-panel">
+                        <h3>📐 纪律策略 — EMA 交叉 + RSI 过滤</h3>
+                        <p class="strategy-desc">
+                            系统会根据 EMA(7) 与 EMA(25) 的交叉信号配合 RSI 指标过滤入场时机。
+                            <strong>只有启用的阶段才会参与自动交易。</strong>
+                        </p>
+                        <div class="strategy-params">
+                            <div class="param"><span>短期 EMA</span><strong>7</strong></div>
+                            <div class="param"><span>长期 EMA</span><strong>25</strong></div>
+                            <div class="param"><span>RSI 周期</span><strong>14</strong></div>
+                            <div class="param"><span>超买阈值</span><strong>70</strong></div>
+                            <div class="param"><span>超卖阈值</span><strong>30</strong></div>
+                            <div class="param"><span>杠杆倍数</span><strong>100x</strong></div>
+                        </div>
+                    </div>
+
+                    <h3 style="margin:24px 0 16px; color: var(--text-main);">💰 策略资金管理</h3>
+                    <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:16px;">每个策略独立分配资金、独立追踪订单盈亏，互不影响。启用策略并分配资金后方可自动交易。</p>
+                    <div class="stages-grid" id="stages-grid" style="grid-template-columns: 1fr !important;">
+                        <!-- JS 动态渲染 -->
+                    </div>
+                </section>
+
+                <!-- ==================== 持仓订单 ==================== -->
+                <section id="page-positions" class="page">
+                    <!-- 手动下单面板 -->
+                    <div class="glass-panel trade-panel" style="margin-bottom:20px;">
+                        <div class="section-header">
+                            <h3>🎮 手动下单</h3>
+                        </div>
+                        <div class="trade-form">
+                            <div class="trade-row">
+                                <div class="trade-field">
+                                    <label>交易对</label>
+                                    <select id="trade-symbol" class="select-input">
+                                        <option value="BTCUSDT">BTC/USDT</option>
+                                        <option value="ETHUSDT" selected>ETH/USDT</option>
+                                        <option value="BNBUSDT">BNB/USDT</option>
+                                        <option value="SOLUSDT">SOL/USDT</option>
+                                        <option value="XRPUSDT">XRP/USDT</option>
+                                        <option value="DOGEUSDT">DOGE/USDT</option>
+                                        <option value="ADAUSDT">ADA/USDT</option>
+                                        <option value="AVAXUSDT">AVAX/USDT</option>
+                                    </select>
+                                </div>
+                                <div class="trade-field">
+                                    <label>金额 (USDT)</label>
+                                    <input type="number" id="trade-amount" class="text-input" value="10" min="5" step="1" />
+                                </div>
+                                <div class="trade-field">
+                                    <label>价格 (USDT, 留空市价)</label>
+                                    <input type="number" id="trade-price" class="text-input" placeholder="市价" step="0.01" />
+                                </div>
+                                <div class="trade-field">
+                                    <label>杠杆</label>
+                                    <select id="trade-leverage" class="select-input">
+                                        <option value="10">10x</option>
+                                        <option value="20">20x</option>
+                                        <option value="50">50x</option>
+                                        <option value="75">75x</option>
+                                        <option value="100" selected>100x</option>
+                                        <option value="125">125x</option>
+                                    </select>
+                                </div>
+                                <div class="trade-field">
+                                    <label>止损 %</label>
+                                    <input type="number" id="trade-sl" class="text-input" value="20" min="1" max="50" step="1" />
+                                </div>
+                                <div class="trade-field">
+                                    <label>止盈 %</label>
+                                    <input type="number" id="trade-tp" class="text-input" value="100" min="1" max="500" step="1" />
+                                </div>
+                                <div class="trade-field">
+                                    <label>所属策略</label>
+                                    <select id="trade-strategy" class="select-input">
+                                        <option value="">手动交易 (无策略)</option>
+                                        <option value="ema_cross">EMA 金叉死叉</option>
+                                        <option value="rsi_reversal">RSI 超买超卖</option>
+                                        <option value="grid_trading">网格交易</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="trade-actions">
+                                <button class="btn btn-long" id="btn-open-long">🟢 开多 (做多)</button>
+                                <button class="btn btn-short" id="btn-open-short">🔴 开空 (做空)</button>
+                                <button class="btn btn-close-long" id="btn-close-long">平多</button>
+                                <button class="btn btn-close-short" id="btn-close-short">平空</button>
+                            </div>
+                            <div class="trade-result" id="trade-result"></div>
+                        </div>
+                    </div>
+
+                    <!-- 持仓表格 (币安合并视图) -->
+                    <div class="glass-panel">
+                        <div class="section-header">
+                            <h3>当前持仓 (交易所合并)</h3>
+                            <button class="btn btn-danger btn-sm" id="btn-close-all">⚡ 一键平仓</button>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>交易对</th>
+                                        <th>方向</th>
+                                        <th>数量</th>
+                                        <th>开仓均价</th>
+                                        <th>标记价格</th>
+                                        <th>杠杆</th>
+                                        <th>保证金</th>
+                                        <th>未实现盈亏</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="positions-table-body">
+                                    <tr><td colspan="8" class="empty-state">暂无持仓</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- 独立订单追踪 -->
+                    <div class="glass-panel" style="margin-top: 20px;">
+                        <div class="section-header">
+                            <h3>📋 独立订单追踪</h3>
+                            <span style="color: var(--text-dim); font-size: 0.85rem;">每笔手动下单独立计算盈亏</span>
+                        </div>
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>订单ID</th>
+                                        <th>交易对</th>
+                                        <th>方向</th>
+                                        <th>数量</th>
+                                        <th>开仓价</th>
+                                        <th>当前价</th>
+                                        <th>杠杆</th>
+                                        <th>投入(U)</th>
+                                        <th>盈亏(U)</th>
+                                        <th>盈亏%</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tracked-orders-body">
+                                    <tr><td colspan="11" class="empty-state">暂无独立订单</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
