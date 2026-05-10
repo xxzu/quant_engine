@@ -269,7 +269,7 @@ pub async fn place_manual_order(
                 }
             }
 
-            // 如果是开仓，设置止损止盈
+            // 如果是开仓，设置止损止盈 (使用 STOP/TAKE_PROFIT 限价条件单, 兼容测试网)
             if !is_close_flag {
                 if let Some(sl_pct) = stop_loss_pct {
                     let sl_pct_dec = Decimal::from_f64_retain(sl_pct).unwrap_or(Decimal::ZERO)
@@ -288,14 +288,14 @@ pub async fn place_manual_order(
                         } else {
                             OrderSide::Buy
                         },
-                        order_type: OrderType::StopMarket,
-                        quantity: None,
-                        price: None,
+                        order_type: OrderType::Stop,
+                        quantity: Some(close_qty),
+                        price: Some(sl_price),
                         stop_price: Some(sl_price),
                         position_side: Some(PositionSide::Both),
-                        reduce_only: None,
-                        time_in_force: None,
-                        close_position: Some(true),
+                        reduce_only: Some(true),
+                        time_in_force: Some("GTC".to_string()),
+                        close_position: None,
                     };
                     match exchange.place_order(&sl_req).await {
                         Ok(_) => tracing::info!("🛑 止损已设置: {}", sl_price),
@@ -320,14 +320,14 @@ pub async fn place_manual_order(
                         } else {
                             OrderSide::Buy
                         },
-                        order_type: OrderType::TakeProfitMarket,
-                        quantity: None,
-                        price: None,
+                        order_type: OrderType::TakeProfit,
+                        quantity: Some(close_qty),
+                        price: Some(tp_price),
                         stop_price: Some(tp_price),
                         position_side: Some(PositionSide::Both),
-                        reduce_only: None,
-                        time_in_force: None,
-                        close_position: Some(true),
+                        reduce_only: Some(true),
+                        time_in_force: Some("GTC".to_string()),
+                        close_position: None,
                     };
                     match exchange.place_order(&tp_req).await {
                         Ok(_) => tracing::info!("🎯 止盈已设置: {}", tp_price),

@@ -66,7 +66,8 @@ pub struct DisciplineStrategy {
     total_pnl: Decimal,
     /// 策略自己是否有持仓 (由引擎管理，只追踪策略开的仓)
     has_position: bool,
-    /// 连续亏损次数
+    /// 连续亏损次数 (由引擎在平仓时更新)
+    #[allow(dead_code)]
     consecutive_losses: u32,
     /// 冷却时间 (毫秒时间戳)
     cooldown_until: i64,
@@ -281,7 +282,10 @@ impl Strategy for DisciplineStrategy {
         // 检查余额是否充足
         let order_amount = self.calculate_order_amount();
         if order_amount < Decimal::from(5) {
-            warn!("⚠️ 余额不足: {}U, 最小开仓 5U", self.allocated_funds + self.total_pnl);
+            warn!(
+                "⚠️ 余额不足: {}U, 最小开仓 5U",
+                self.allocated_funds + self.total_pnl
+            );
             return Ok(vec![]);
         }
 
@@ -322,9 +326,7 @@ impl Strategy for DisciplineStrategy {
         if position.symbol == self.config.symbol {
             info!(
                 "📊 持仓更新通知: {} 数量={} 未实现盈亏={}",
-                position.symbol,
-                position.quantity,
-                position.unrealized_pnl
+                position.symbol, position.quantity, position.unrealized_pnl
             );
         }
         Ok(vec![])
@@ -355,5 +357,10 @@ impl Strategy for DisciplineStrategy {
     fn sync_funds(&mut self, allocated_funds: Decimal, total_pnl: Decimal) {
         self.allocated_funds = allocated_funds;
         self.total_pnl = total_pnl;
+    }
+
+    fn set_has_position(&mut self, has: bool) {
+        info!("🔄 策略持仓状态变更: {} -> {}", self.has_position, has);
+        self.has_position = has;
     }
 }
