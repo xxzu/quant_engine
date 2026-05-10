@@ -60,14 +60,20 @@ pub struct DisciplineStrategy {
     close_prices: VecDeque<Decimal>,
     /// 最大缓存 K 线数
     max_history: usize,
-    /// 当前余额 (由上下文更新)
-    current_balance: Decimal,
-    /// 是否已有持仓
+    /// 策略分配资金 (由引擎同步)
+    allocated_funds: Decimal,
+    /// 策略累计盈亏
+    total_pnl: Decimal,
+    /// 策略自己是否有持仓 (由引擎管理，只追踪策略开的仓)
     has_position: bool,
     /// 连续亏损次数
     consecutive_losses: u32,
     /// 冷却时间 (毫秒时间戳)
     cooldown_until: i64,
+    /// 指标预热是否完成
+    is_warmed_up: bool,
+    /// K线计数器 (调试用)
+    kline_count: u64,
 }
 
 impl DisciplineStrategy {
@@ -77,10 +83,13 @@ impl DisciplineStrategy {
             config,
             close_prices: VecDeque::with_capacity(200),
             max_history,
-            current_balance: Decimal::ZERO,
+            allocated_funds: Decimal::ZERO,
+            total_pnl: Decimal::ZERO,
             has_position: false,
             consecutive_losses: 0,
             cooldown_until: 0,
+            is_warmed_up: false,
+            kline_count: 0,
         }
     }
 
@@ -107,9 +116,10 @@ impl DisciplineStrategy {
         })
     }
 
-    /// 根据当前余额计算每单金额
+    /// 根据策略分配资金计算每单金额
     fn calculate_order_amount(&self) -> Decimal {
-        let balance = self.current_balance;
+        // 使用策略自身的分配资金 + 累计盈亏，而不是总账户余额
+        let balance = self.allocated_funds + self.total_pnl;
 
         // 阶段规则
         if balance >= Decimal::from(200) {
@@ -123,6 +133,18 @@ impl DisciplineStrategy {
             // 10-80U : 余额的 50%
             balance * self.config.position_ratio
         }
+    }
+
+    /// 外部同步策略资金信息（由引擎在每次信号检查前调用）
+    pub fn sync_funds(&mut self, allocated_funds: Decimal, total_pnl: Decimal) {
+        self.allocated_funds = allocated_funds;
+        self.total_pnl = total_pnl;
+    }
+
+    /// 标记预热完成
+    pub fn mark_warmed_up(&mut self) {
+        self.is_warmed_up = true;
+        info!("✅ 纪律策略指标预热完成，开始监听实时信号");
     }
 
     /// 计算技术指标，生成入场方向
@@ -203,14 +225,13 @@ impl Strategy for DisciplineStrategy {
     }
 
     async fn init(&mut self, ctx: &StrategyContext) -> Result<()> {
-        self.current_balance = ctx.available_balance;
         self.has_position = ctx.has_position(&self.config.symbol);
         info!(
-            "🎯 纪律策略初始化: 余额={}U, 杠杆={}x, 止损={}%, 止盈={}%",
-            self.current_balance,
+            "🎯 纪律策略初始化: 杠杆={}x, 止损={}%, 止盈={}%, 当前持仓={}",
             self.config.leverage,
             self.config.stop_loss_pct,
-            self.config.take_profit_pct
+            self.config.take_profit_pct,
+            self.has_position
         );
         Ok(())
     }
@@ -227,6 +248,25 @@ impl Strategy for DisciplineStrategy {
             self.close_prices.pop_front();
         }
 
+        // 预热阶段：只更新价格历史，不产生信号
+        if !self.is_warmed_up {
+            return Ok(vec![]);
+        }
+
+        self.kline_count += 1;
+
+        // 每10根K线输出一次状态日志
+        if self.kline_count % 10 == 1 {
+            info!(
+                "📊 策略状态: K线#{} 价格={} 资金={}U 持仓={} 冷却={}",
+                self.kline_count,
+                kline.close.round_dp(2),
+                (self.allocated_funds + self.total_pnl).round_dp(2),
+                self.has_position,
+                self.cooldown_until > chrono::Utc::now().timestamp_millis()
+            );
+        }
+
         // 如果已有持仓，不开新仓（单持仓模式）
         if self.has_position {
             return Ok(vec![]);
@@ -241,7 +281,7 @@ impl Strategy for DisciplineStrategy {
         // 检查余额是否充足
         let order_amount = self.calculate_order_amount();
         if order_amount < Decimal::from(5) {
-            warn!("⚠️ 余额不足: {}U, 最小开仓 5U", self.current_balance);
+            warn!("⚠️ 余额不足: {}U, 最小开仓 5U", self.allocated_funds + self.total_pnl);
             return Ok(vec![]);
         }
 
@@ -277,29 +317,16 @@ impl Strategy for DisciplineStrategy {
     }
 
     async fn on_position_update(&mut self, position: &FuturesPosition) -> Result<Vec<Signal>> {
-        if position.symbol != self.config.symbol {
-            return Ok(vec![]);
+        // 注意：has_position 现在由引擎根据策略自己的交易来管理
+        // 这里只做日志记录，不管理 has_position
+        if position.symbol == self.config.symbol {
+            info!(
+                "📊 持仓更新通知: {} 数量={} 未实现盈亏={}",
+                position.symbol,
+                position.quantity,
+                position.unrealized_pnl
+            );
         }
-
-        let was_in_position = self.has_position;
-        self.has_position = !position.quantity.is_zero();
-
-        // 持仓从有到无 = 平仓了
-        if was_in_position && !self.has_position {
-            let pnl = position.unrealized_pnl;
-            if pnl < Decimal::ZERO {
-                self.consecutive_losses += 1;
-                // 连续亏损 3 次，冷却 30 分钟
-                if self.consecutive_losses >= 3 {
-                    let cooldown_ms = 30 * 60 * 1000;
-                    self.cooldown_until = chrono::Utc::now().timestamp_millis() + cooldown_ms;
-                    warn!("⏸️ 连续亏损 {} 次，冷却 30 分钟", self.consecutive_losses);
-                }
-            } else {
-                self.consecutive_losses = 0;
-            }
-        }
-
         Ok(vec![])
     }
 
@@ -314,5 +341,19 @@ impl Strategy for DisciplineStrategy {
     async fn on_stop(&mut self) -> Result<()> {
         info!("⏹️ 纪律策略已停止");
         Ok(())
+    }
+
+    fn update_balance(&mut self, _balance: Decimal) {
+        // 余额同步改由 sync_funds() 方法处理
+    }
+
+    fn mark_warmed_up(&mut self) {
+        self.is_warmed_up = true;
+        info!("✅ 纪律策略指标预热完成，开始监听实时信号");
+    }
+
+    fn sync_funds(&mut self, allocated_funds: Decimal, total_pnl: Decimal) {
+        self.allocated_funds = allocated_funds;
+        self.total_pnl = total_pnl;
     }
 }

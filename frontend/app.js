@@ -330,6 +330,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let mainVolumeSeries = null;
     let currentSymbol = 'ETHUSDT';
     let currentInterval = '15m';
+    let chartCache = new Map(); // Simple cache: key -> {time, data}
+    let isChartLoading = false;
 
     function initMainChart() {
         const container = document.getElementById('main-chart');
@@ -373,35 +375,63 @@ document.addEventListener('DOMContentLoaded', () => {
         const symbol = document.getElementById('chart-symbol').value;
         currentSymbol = symbol;
 
+        const cacheKey = `${symbol}_${currentInterval}`;
+        const cached = chartCache.get(cacheKey);
+        const now = Date.now();
+
+        // 2秒内如果有缓存且不是强制刷新，直接用缓存
+        if (cached && (now - cached.time < 2000)) {
+            renderChartData(cached.data);
+            return;
+        }
+
+        if (isChartLoading) return;
+        isChartLoading = true;
+
+        const priceEl = document.getElementById('chart-live-price');
+        if (priceEl) priceEl.style.opacity = '0.5';
+
         try {
             const res = await fetch(`/api/v1/klines/${symbol}/${currentInterval}`);
             const data = await res.json();
+            isChartLoading = false;
+            if (priceEl) priceEl.style.opacity = '1';
 
-            if (data.klines && data.klines.length > 0) {
-                mainCandleSeries.setData(data.klines);
-
-                // Volume with colors
-                const volumeData = data.klines.map(k => ({
-                    time: k.time,
-                    value: k.volume,
-                    color: k.close >= k.open ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)',
-                }));
-                mainVolumeSeries.setData(volumeData);
-
-                mainChart.timeScale().fitContent();
-
-                // Update price display
-                const last = data.klines[data.klines.length - 1];
-                const first = data.klines[0];
-                const change = ((last.close - first.open) / first.open * 100);
-                const priceEl = document.getElementById('chart-live-price');
-                const changeEl = document.getElementById('chart-change');
-
-                priceEl.textContent = fmt(last.close, last.close > 100 ? 2 : 4);
-                changeEl.textContent = (change >= 0 ? '+' : '') + fmt(change) + '%';
-                changeEl.className = 'chart-change ' + (change >= 0 ? 'positive' : 'negative');
+            if (data.klines) {
+                chartCache.set(cacheKey, { time: Date.now(), data: data.klines });
+                renderChartData(data.klines);
             }
-        } catch (e) { console.error('Chart load error:', e); }
+        } catch (e) { 
+            isChartLoading = false;
+            if (priceEl) priceEl.style.opacity = '1';
+            console.error('Chart load error:', e); 
+        }
+    }
+
+    function renderChartData(klines) {
+        if (!klines || klines.length === 0) return;
+        mainCandleSeries.setData(klines);
+
+        const volumeData = klines.map(k => ({
+            time: k.time,
+            value: k.volume,
+            color: k.close >= k.open ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)',
+        }));
+        mainVolumeSeries.setData(volumeData);
+        mainChart.timeScale().fitContent();
+
+        // Update price display
+        const last = klines[klines.length - 1];
+        const first = klines[0];
+        const change = ((last.close - first.open) / first.open * 100);
+        const priceEl = document.getElementById('chart-live-price');
+        const changeEl = document.getElementById('chart-change');
+
+        if (priceEl) priceEl.textContent = fmt(last.close, last.close > 100 ? 2 : 4);
+        if (changeEl) {
+            changeEl.textContent = (change >= 0 ? '+' : '') + fmt(change) + '%';
+            changeEl.className = 'chart-change ' + (change >= 0 ? 'positive' : 'negative');
+        }
     }
 
     document.getElementById('chart-symbol').addEventListener('change', loadChart);

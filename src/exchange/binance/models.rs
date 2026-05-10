@@ -194,3 +194,44 @@ pub struct WsOrderData {
     #[serde(rename = "rp")]
     pub realized_pnl: String,
 }
+
+/// WebSocket 用户数据 - 账户更新 (ACCOUNT_UPDATE)
+#[derive(Debug, Deserialize)]
+pub struct WsAccountUpdate {
+    #[serde(rename = "e")]
+    pub event_type: String,
+    #[serde(rename = "a")]
+    pub account: WsAccountData,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WsAccountData {
+    #[serde(rename = "B")]
+    pub balances: Vec<WsBalanceData>,
+    #[serde(rename = "P")]
+    pub positions: Vec<WsPositionData>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WsBalanceData {
+    #[serde(rename = "a")]
+    pub asset: String,
+    #[serde(rename = "wb")]
+    pub wallet_balance: String,
+    #[serde(rename = "cw")]
+    pub cross_wallet_balance: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WsPositionData {
+    #[serde(rename = "s")]
+    pub symbol: String,
+    #[serde(rename = "pa")]
+    pub position_amount: String,
+    #[serde(rename = "ep")]
+    pub entry_price: String,
+    #[serde(rename = "up")]
+    pub unrealized_pnl: String,
+    #[serde(rename = "ps")]
+    pub position_side: String,
+}

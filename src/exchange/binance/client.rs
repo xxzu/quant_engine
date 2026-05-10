@@ -26,12 +26,18 @@ pub struct BinanceClient {
 impl BinanceClient {
     /// 创建新客户端
     pub fn new(api_key: &str, secret_key: &str, base_url: &str, ws_url: &str) -> Self {
+        let http = Client::builder()
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
+            .tcp_keepalive(std::time::Duration::from_secs(60))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_default();
         Self {
             api_key: api_key.to_string(),
             secret_key: secret_key.to_string(),
             base_url: base_url.trim_end_matches('/').to_string(),
             ws_url: ws_url.trim_end_matches('/').to_string(),
-            http: Client::new(),
+            http,
         }
     }
 

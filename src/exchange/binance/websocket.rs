@@ -176,7 +176,67 @@ pub async fn spawn_user_data_ws(
                                             }
                                         }
                                         "ACCOUNT_UPDATE" => {
-                                            info!("📊 收到账户更新事件");
+                                            if let Ok(update) =
+                                                serde_json::from_str::<WsAccountUpdate>(&text)
+                                            {
+                                                // 解析持仓变更
+                                                let positions: Vec<FuturesPosition> = update
+                                                    .account
+                                                    .positions
+                                                    .iter()
+                                                    .filter(|p| {
+                                                        let amt = parse_dec(&p.position_amount);
+                                                        !amt.is_zero()
+                                                    })
+                                                    .map(|p| FuturesPosition {
+                                                        symbol: p.symbol.clone(),
+                                                        position_side: match p
+                                                            .position_side
+                                                            .as_str()
+                                                        {
+                                                            "LONG" => PositionSide::Long,
+                                                            "SHORT" => PositionSide::Short,
+                                                            _ => PositionSide::Both,
+                                                        },
+                                                        quantity: parse_dec(&p.position_amount),
+                                                        entry_price: parse_dec(&p.entry_price),
+                                                        mark_price: Decimal::ZERO,
+                                                        unrealized_pnl: parse_dec(
+                                                            &p.unrealized_pnl,
+                                                        ),
+                                                        leverage: 0,
+                                                        margin_mode: MarginMode::Isolated,
+                                                        liquidation_price: Decimal::ZERO,
+                                                        margin: Decimal::ZERO,
+                                                    })
+                                                    .collect();
+
+                                                let _ = tx
+                                                    .send(UserDataEvent::PositionUpdate(positions));
+
+                                                // 解析余额变更
+                                                if let Some(usdt_bal) = update
+                                                    .account
+                                                    .balances
+                                                    .iter()
+                                                    .find(|b| b.asset == "USDT")
+                                                {
+                                                    let wallet =
+                                                        parse_dec(&usdt_bal.wallet_balance);
+                                                    let cross =
+                                                        parse_dec(&usdt_bal.cross_wallet_balance);
+                                                    let _ = tx.send(UserDataEvent::AccountUpdate(
+                                                        FuturesAccount {
+                                                            total_balance: wallet,
+                                                            available_balance: cross,
+                                                            unrealized_pnl: Decimal::ZERO,
+                                                            margin_used: Decimal::ZERO,
+                                                        },
+                                                    ));
+                                                }
+
+                                                info!("📊 账户更新: 持仓和余额已同步");
+                                            }
                                         }
                                         _ => {}
                                     }

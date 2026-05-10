@@ -57,7 +57,7 @@ pub async fn place_manual_order(
     // 平仓操作不需要检查余额
     let is_close = req.direction == "close_long" || req.direction == "close_short";
 
-    let mut amount = Decimal::from_f64_retain(req.amount_usdt).unwrap_or(Decimal::ZERO);
+    let amount = Decimal::from_f64_retain(req.amount_usdt).unwrap_or(Decimal::ZERO);
     let mut stop_loss_pct = req.stop_loss_pct;
     let mut take_profit_pct = req.take_profit_pct;
     let mut leverage = req.leverage;
@@ -241,10 +241,10 @@ pub async fn place_manual_order(
                     } else {
                         order_price
                     },
-                    leverage: leverage,
+                    leverage,
                     amount_usdt: amount,
-                    stop_loss_pct: stop_loss_pct,
-                    take_profit_pct: take_profit_pct,
+                    stop_loss_pct,
+                    take_profit_pct,
                     opened_at: std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()
@@ -289,15 +289,18 @@ pub async fn place_manual_order(
                             OrderSide::Buy
                         },
                         order_type: OrderType::StopMarket,
-                        quantity: Some(close_qty),
+                        quantity: None,
                         price: None,
                         stop_price: Some(sl_price),
                         position_side: Some(PositionSide::Both),
-                        reduce_only: Some(true),
+                        reduce_only: None,
                         time_in_force: None,
-                        close_position: None,
+                        close_position: Some(true),
                     };
-                    let _ = exchange.place_order(&sl_req).await;
+                    match exchange.place_order(&sl_req).await {
+                        Ok(_) => tracing::info!("🛑 止损已设置: {}", sl_price),
+                        Err(e) => tracing::error!("⚠️ 止损设置失败: {}", e),
+                    }
                 }
 
                 if let Some(tp_pct) = take_profit_pct {
@@ -318,15 +321,18 @@ pub async fn place_manual_order(
                             OrderSide::Buy
                         },
                         order_type: OrderType::TakeProfitMarket,
-                        quantity: Some(close_qty),
+                        quantity: None,
                         price: None,
                         stop_price: Some(tp_price),
                         position_side: Some(PositionSide::Both),
-                        reduce_only: Some(true),
+                        reduce_only: None,
                         time_in_force: None,
-                        close_position: None,
+                        close_position: Some(true),
                     };
-                    let _ = exchange.place_order(&tp_req).await;
+                    match exchange.place_order(&tp_req).await {
+                        Ok(_) => tracing::info!("🎯 止盈已设置: {}", tp_price),
+                        Err(e) => tracing::error!("⚠️ 止盈设置失败: {}", e),
+                    }
                 }
             }
 

@@ -39,4 +39,21 @@ pub trait Strategy: Send + Sync {
     async fn on_stop(&mut self) -> Result<()> {
         Ok(())
     }
+
+    /// 更新策略使用的余额（由引擎在账户变更时调用）
+    fn update_balance(&mut self, _balance: rust_decimal::Decimal) {}
+
+    /// 标记指标预热完成（历史K线加载完毕后调用）
+    fn mark_warmed_up(&mut self) {}
+
+    /// 同步策略分配资金和累计盈亏
+    fn sync_funds(
+        &mut self,
+        _allocated_funds: rust_decimal::Decimal,
+        _total_pnl: rust_decimal::Decimal,
+    ) {
+    }
+
+    /// 设置策略的持仓状态（由引擎在策略交易成功后调用）
+    fn set_has_position(&mut self, _has: bool) {}
 }

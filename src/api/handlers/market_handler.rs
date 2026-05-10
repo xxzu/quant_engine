@@ -1,6 +1,17 @@
 //! 行情数据处理器
 
-use axum::{extract::Path, Json};
+use crate::exchange::types::ExchangeApi;
+use axum::{extract::Path, Extension, Json};
+use lazy_static::lazy_static;
+use std::sync::Arc;
+
+lazy_static! {
+    static ref HTTP_CLIENT: reqwest::Client = reqwest::Client::builder()
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        .tcp_keepalive(std::time::Duration::from_secs(60))
+        .build()
+        .unwrap_or_default();
+}
 
 /// 热门合约交易对列表
 const FUTURES_SYMBOLS: &[&str] = &[
@@ -33,7 +44,7 @@ pub async fn get_symbols() -> Json<serde_json::Value> {
 
 /// 获取多交易对实时行情 (通过币安公开API)
 pub async fn get_market_prices() -> Json<serde_json::Value> {
-    let client = reqwest::Client::new();
+    let client = &*HTTP_CLIENT;
 
     // 合约价格
     let futures_url = "https://testnet.binancefuture.com/fapi/v1/ticker/price";
@@ -97,30 +108,25 @@ pub async fn get_market_prices() -> Json<serde_json::Value> {
 /// 获取K线数据 (供前端图表使用)
 pub async fn get_klines(
     Path((symbol, interval)): Path<(String, String)>,
+    Extension(exchange): Extension<Arc<dyn ExchangeApi>>,
 ) -> Json<serde_json::Value> {
-    let client = reqwest::Client::new();
-    let url = format!(
-        "https://testnet.binancefuture.com/fapi/v1/klines?symbol={}&interval={}&limit=200",
-        symbol, interval
-    );
-
-    match client.get(&url).send().await {
-        Ok(resp) => match resp.json::<Vec<Vec<serde_json::Value>>>().await {
-            Ok(data) => {
-                let klines: Vec<serde_json::Value> = data.iter().map(|k| {
-                        serde_json::json!({
-                            "time": k.first().and_then(|v| v.as_i64()).unwrap_or(0) / 1000,
-                            "open": k.get(1).and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
-                            "high": k.get(2).and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
-                            "low": k.get(3).and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
-                            "close": k.get(4).and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
-                            "volume": k.get(5).and_then(|v| v.as_str()).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
-                        })
-                    }).collect();
-                Json(serde_json::json!({ "klines": klines }))
-            }
-            Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
-        },
+    match exchange.get_klines(&symbol, &interval, 200).await {
+        Ok(data) => {
+            let klines: Vec<serde_json::Value> = data
+                .iter()
+                .map(|k| {
+                    serde_json::json!({
+                        "time": k.open_time / 1000,
+                        "open": k.open,
+                        "high": k.high,
+                        "low": k.low,
+                        "close": k.close,
+                        "volume": k.volume,
+                    })
+                })
+                .collect();
+            Json(serde_json::json!({ "klines": klines }))
+        }
         Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
     }
 }
