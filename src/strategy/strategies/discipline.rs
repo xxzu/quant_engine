@@ -225,14 +225,14 @@ impl Strategy for DisciplineStrategy {
         "纪律型合约策略 - EMA交叉+RSI过滤, 严格止损止盈"
     }
 
-    async fn init(&mut self, ctx: &StrategyContext) -> Result<()> {
-        self.has_position = ctx.has_position(&self.config.symbol);
+    async fn init(&mut self, _ctx: &StrategyContext) -> Result<()> {
+        // has_position 由引擎管理，初始为 false（只追踪策略自己开的仓）
+        self.has_position = false;
         info!(
-            "🎯 纪律策略初始化: 杠杆={}x, 止损={}%, 止盈={}%, 当前持仓={}",
+            "🎯 纪律策略初始化: 杠杆={}x, 止损={}%, 止盈={}%",
             self.config.leverage,
             self.config.stop_loss_pct,
-            self.config.take_profit_pct,
-            self.has_position
+            self.config.take_profit_pct
         );
         Ok(())
     }
