@@ -398,48 +398,12 @@ impl TradingEngine {
                     signal.symbol, quantity, resp.avg_price
                 );
 
-                // 设置止损单 (做多止损在下方)
-                if let Some(sl_pct) = &signal.stop_loss_pct {
-                    let sl_price = price * (Decimal::ONE - *sl_pct / Decimal::from(100));
-                    let sl_price = sl_price.round_dp(contract.price_precision as u32);
-                    let sl_req = OrderRequest {
-                        symbol: signal.symbol.clone(),
-                        side: OrderSide::Sell,
-                        order_type: OrderType::Stop,
-                        quantity: Some(quantity),
-                        price: Some(sl_price),
-                        stop_price: Some(sl_price),
-                        position_side: Some(PositionSide::Both),
-                        reduce_only: Some(true),
-                        time_in_force: Some("GTC".to_string()),
-                        close_position: None,
-                    };
-                    match exchange.place_order(&sl_req).await {
-                        Ok(_) => info!("🛑 止损已设置: {}", sl_price),
-                        Err(e) => error!("⚠️ 止损设置失败: {}", e),
-                    }
-                }
-
-                // 设置止盈单 (做多止盈在上方)
-                if let Some(tp_pct) = &signal.take_profit_pct {
-                    let tp_price = price * (Decimal::ONE + *tp_pct / Decimal::from(100));
-                    let tp_price = tp_price.round_dp(contract.price_precision as u32);
-                    let tp_req = OrderRequest {
-                        symbol: signal.symbol.clone(),
-                        side: OrderSide::Sell,
-                        order_type: OrderType::TakeProfit,
-                        quantity: Some(quantity),
-                        price: Some(tp_price),
-                        stop_price: Some(tp_price),
-                        position_side: Some(PositionSide::Both),
-                        reduce_only: Some(true),
-                        time_in_force: Some("GTC".to_string()),
-                        close_position: None,
-                    };
-                    match exchange.place_order(&tp_req).await {
-                        Ok(_) => info!("🎯 止盈已设置: {}", tp_price),
-                        Err(e) => error!("⚠️ 止盈设置失败: {}", e),
-                    }
+                // 止损/止盈由引擎级强制监控处理 (币安测试网不支持条件单)
+                if signal.stop_loss_pct.is_some() || signal.take_profit_pct.is_some() {
+                    info!(
+                        "🛡️ 止损{:?}%/止盈{:?}% 由引擎实时监控",
+                        signal.stop_loss_pct, signal.take_profit_pct
+                    );
                 }
             }
 
@@ -467,48 +431,12 @@ impl TradingEngine {
                     signal.symbol, quantity, resp.avg_price
                 );
 
-                // 止损 (做空止损在上方)
-                if let Some(sl_pct) = &signal.stop_loss_pct {
-                    let sl_price = price * (Decimal::ONE + *sl_pct / Decimal::from(100));
-                    let sl_price = sl_price.round_dp(contract.price_precision as u32);
-                    let sl_req = OrderRequest {
-                        symbol: signal.symbol.clone(),
-                        side: OrderSide::Buy,
-                        order_type: OrderType::Stop,
-                        quantity: Some(quantity),
-                        price: Some(sl_price),
-                        stop_price: Some(sl_price),
-                        position_side: Some(PositionSide::Both),
-                        reduce_only: Some(true),
-                        time_in_force: Some("GTC".to_string()),
-                        close_position: None,
-                    };
-                    match exchange.place_order(&sl_req).await {
-                        Ok(_) => info!("🛑 空单止损已设置: {}", sl_price),
-                        Err(e) => error!("⚠️ 空单止损设置失败: {}", e),
-                    }
-                }
-
-                // 止盈 (做空止盈在下方)
-                if let Some(tp_pct) = &signal.take_profit_pct {
-                    let tp_price = price * (Decimal::ONE - *tp_pct / Decimal::from(100));
-                    let tp_price = tp_price.round_dp(contract.price_precision as u32);
-                    let tp_req = OrderRequest {
-                        symbol: signal.symbol.clone(),
-                        side: OrderSide::Buy,
-                        order_type: OrderType::TakeProfit,
-                        quantity: Some(quantity),
-                        price: Some(tp_price),
-                        stop_price: Some(tp_price),
-                        position_side: Some(PositionSide::Both),
-                        reduce_only: Some(true),
-                        time_in_force: Some("GTC".to_string()),
-                        close_position: None,
-                    };
-                    match exchange.place_order(&tp_req).await {
-                        Ok(_) => info!("🎯 空单止盈已设置: {}", tp_price),
-                        Err(e) => error!("⚠️ 空单止盈设置失败: {}", e),
-                    }
+                // 止损/止盈由引擎级强制监控处理
+                if signal.stop_loss_pct.is_some() || signal.take_profit_pct.is_some() {
+                    info!(
+                        "🛡️ 止损{:?}%/止盈{:?}% 由引擎实时监控",
+                        signal.stop_loss_pct, signal.take_profit_pct
+                    );
                 }
             }
 

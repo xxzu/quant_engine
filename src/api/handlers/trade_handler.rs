@@ -269,70 +269,14 @@ pub async fn place_manual_order(
                 }
             }
 
-            // 如果是开仓，设置止损止盈 (使用 STOP/TAKE_PROFIT 限价条件单, 兼容测试网)
+            // 止损/止盈由引擎级强制监控处理 (每次K线更新自动检查持仓盈亏)
+            // 币安测试网不支持任何条件单类型，所以不再尝试挂单
             if !is_close_flag {
-                if let Some(sl_pct) = stop_loss_pct {
-                    let sl_pct_dec = Decimal::from_f64_retain(sl_pct).unwrap_or(Decimal::ZERO)
-                        / Decimal::from(100);
-                    let sl_price = if order_side == OrderSide::Buy {
-                        order_price * (Decimal::ONE - sl_pct_dec)
-                    } else {
-                        order_price * (Decimal::ONE + sl_pct_dec)
-                    };
-                    let sl_price = sl_price.round_dp(contract.price_precision as u32);
-
-                    let sl_req = OrderRequest {
-                        symbol: req.symbol.clone(),
-                        side: if order_side == OrderSide::Buy {
-                            OrderSide::Sell
-                        } else {
-                            OrderSide::Buy
-                        },
-                        order_type: OrderType::Stop,
-                        quantity: Some(close_qty),
-                        price: Some(sl_price),
-                        stop_price: Some(sl_price),
-                        position_side: Some(PositionSide::Both),
-                        reduce_only: Some(true),
-                        time_in_force: Some("GTC".to_string()),
-                        close_position: None,
-                    };
-                    match exchange.place_order(&sl_req).await {
-                        Ok(_) => tracing::info!("🛑 止损已设置: {}", sl_price),
-                        Err(e) => tracing::error!("⚠️ 止损设置失败: {}", e),
-                    }
+                if let Some(sl) = stop_loss_pct {
+                    tracing::info!("🛡️ 止损 {}% 由引擎实时监控保护", sl);
                 }
-
-                if let Some(tp_pct) = take_profit_pct {
-                    let tp_pct_dec = Decimal::from_f64_retain(tp_pct).unwrap_or(Decimal::ZERO)
-                        / Decimal::from(100);
-                    let tp_price = if order_side == OrderSide::Buy {
-                        order_price * (Decimal::ONE + tp_pct_dec)
-                    } else {
-                        order_price * (Decimal::ONE - tp_pct_dec)
-                    };
-                    let tp_price = tp_price.round_dp(contract.price_precision as u32);
-
-                    let tp_req = OrderRequest {
-                        symbol: req.symbol.clone(),
-                        side: if order_side == OrderSide::Buy {
-                            OrderSide::Sell
-                        } else {
-                            OrderSide::Buy
-                        },
-                        order_type: OrderType::TakeProfit,
-                        quantity: Some(close_qty),
-                        price: Some(tp_price),
-                        stop_price: Some(tp_price),
-                        position_side: Some(PositionSide::Both),
-                        reduce_only: Some(true),
-                        time_in_force: Some("GTC".to_string()),
-                        close_position: None,
-                    };
-                    match exchange.place_order(&tp_req).await {
-                        Ok(_) => tracing::info!("🎯 止盈已设置: {}", tp_price),
-                        Err(e) => tracing::error!("⚠️ 止盈设置失败: {}", e),
-                    }
+                if let Some(tp) = take_profit_pct {
+                    tracing::info!("🛡️ 止盈 {}% 由引擎实时监控保护", tp);
                 }
             }
 
