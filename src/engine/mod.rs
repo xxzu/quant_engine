@@ -86,6 +86,26 @@ impl TradingEngine {
             st.is_running = true;
         }
 
+        // 3.5 拉取当前持仓 (启动时同步)
+        let positions = self.exchange.get_positions(Some(symbol)).await?;
+        let active_positions: Vec<_> = positions
+            .into_iter()
+            .filter(|p| !p.quantity.is_zero())
+            .collect();
+        if !active_positions.is_empty() {
+            info!("📊 检测到 {} 个活跃持仓", active_positions.len());
+            for p in &active_positions {
+                info!(
+                    "  └ {} qty={} 开仓价={} 保证金={}U",
+                    p.symbol, p.quantity, p.entry_price, p.margin
+                );
+            }
+        }
+        {
+            let mut st = self.state.write().await;
+            st.positions = active_positions;
+        }
+
         // 4. 加载历史 K 线 (预热指标)
         info!("📊 加载历史K线预热指标...");
         let history = self.exchange.get_klines(symbol, interval, 100).await?;
@@ -124,6 +144,102 @@ impl TradingEngine {
                             let mut st = state.write().await;
                             st.last_price = kline.close;
                         }
+
+                        // ========== 引擎级强制止损/止盈监控 ==========
+                        // 每次价格更新都检查（包括未收盘K线），不依赖交易所挂单
+                        {
+                            let st = state.read().await;
+                            let positions_to_check: Vec<_> = st.positions.iter()
+                                .filter(|p| !p.quantity.is_zero())
+                                .cloned()
+                                .collect();
+                            drop(st); // 释放读锁
+
+                            let current_price = kline.close;
+                            for pos in &positions_to_check {
+                                let margin = pos.margin;
+                                if margin.is_zero() || pos.entry_price.is_zero() {
+                                    continue;
+                                }
+                                // 用实时价格重新计算未实现盈亏
+                                let realtime_pnl = if pos.quantity > Decimal::ZERO {
+                                    // 多仓: (当前价 - 开仓价) * 数量
+                                    (current_price - pos.entry_price) * pos.quantity.abs()
+                                } else {
+                                    // 空仓: (开仓价 - 当前价) * 数量
+                                    (pos.entry_price - current_price) * pos.quantity.abs()
+                                };
+                                let pnl_pct = realtime_pnl / margin * Decimal::from(100);
+
+                                // 止损: 亏损超过 -20%
+                                if pnl_pct <= Decimal::from(-20) {
+                                    error!(
+                                        "🚨 引擎强制止损触发! {} 浮亏={:.2}% ({}U) 保证金={}U",
+                                        pos.symbol, pnl_pct, pos.unrealized_pnl, margin
+                                    );
+                                    let close_side = if pos.quantity > Decimal::ZERO {
+                                        OrderSide::Sell
+                                    } else {
+                                        OrderSide::Buy
+                                    };
+                                    // 先撤掉所有挂单
+                                    let _ = exchange.cancel_all_orders(&pos.symbol).await;
+                                    let close_req = OrderRequest {
+                                        symbol: pos.symbol.clone(),
+                                        side: close_side,
+                                        order_type: OrderType::Market,
+                                        quantity: Some(pos.quantity.abs()),
+                                        price: None,
+                                        stop_price: None,
+                                        position_side: Some(PositionSide::Both),
+                                        reduce_only: Some(true),
+                                        time_in_force: None,
+                                        close_position: None,
+                                    };
+                                    match exchange.place_order(&close_req).await {
+                                        Ok(_) => {
+                                            error!("🛑 强制止损平仓成功: {} qty={}", pos.symbol, pos.quantity.abs());
+                                            strategy.lock().await.set_has_position(false);
+                                        }
+                                        Err(e) => error!("❌ 强制止损平仓失败: {}", e),
+                                    }
+                                }
+
+                                // 止盈: 盈利超过 +100%
+                                if pnl_pct >= Decimal::from(100) {
+                                    info!(
+                                        "🎉 引擎强制止盈触发! {} 浮盈={:.2}% ({}U)",
+                                        pos.symbol, pnl_pct, pos.unrealized_pnl
+                                    );
+                                    let close_side = if pos.quantity > Decimal::ZERO {
+                                        OrderSide::Sell
+                                    } else {
+                                        OrderSide::Buy
+                                    };
+                                    let _ = exchange.cancel_all_orders(&pos.symbol).await;
+                                    let close_req = OrderRequest {
+                                        symbol: pos.symbol.clone(),
+                                        side: close_side,
+                                        order_type: OrderType::Market,
+                                        quantity: Some(pos.quantity.abs()),
+                                        price: None,
+                                        stop_price: None,
+                                        position_side: Some(PositionSide::Both),
+                                        reduce_only: Some(true),
+                                        time_in_force: None,
+                                        close_position: None,
+                                    };
+                                    match exchange.place_order(&close_req).await {
+                                        Ok(_) => {
+                                            info!("🎯 强制止盈平仓成功: {} qty={}", pos.symbol, pos.quantity.abs());
+                                            strategy.lock().await.set_has_position(false);
+                                        }
+                                        Err(e) => error!("❌ 强制止盈平仓失败: {}", e),
+                                    }
+                                }
+                            }
+                        }
+                        // ========== 强制监控结束 ==========
 
                         // 检查策略是否在 EngineState 中被启用且有资金
                         let (strategy_active, alloc_funds, total_pnl) = {

@@ -230,9 +230,7 @@ impl Strategy for DisciplineStrategy {
         self.has_position = false;
         info!(
             "🎯 纪律策略初始化: 杠杆={}x, 止损={}%, 止盈={}%",
-            self.config.leverage,
-            self.config.stop_loss_pct,
-            self.config.take_profit_pct
+            self.config.leverage, self.config.stop_loss_pct, self.config.take_profit_pct
         );
         Ok(())
     }
